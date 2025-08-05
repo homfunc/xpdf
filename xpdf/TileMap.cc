@@ -8,10 +8,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma implementation
-#endif
-
 #include "gmem.h"
 #include "gmempp.h"
 #include "GList.h"
@@ -786,17 +782,18 @@ GBool TileMap::cvtDevToWindow(int pg, int xd, int yd,
     break;
 
   case displaySideBySideSingle:
-    if (!(pg == state->getScrollPage() ||
-	  (pg == state->getScrollPage() + 1 &&
-	   state->getScrollPage() + 1 <= state->getDoc()->getNumPages()))) {
+    leftPg = (state->getScrollPage() - 1) | 1;
+    if (!(pg == leftPg ||
+	  (pg == leftPg + 1 &&
+	   leftPg + 1 <= state->getDoc()->getNumPages()))) {
       *xw = *yw = 0;
       return gFalse;
     }
-    pageW1 = pageW[state->getScrollPage() - 1];
-    pageH1 = pageH[state->getScrollPage() - 1];
-    if (state->getScrollPage() + 1 <= state->getDoc()->getNumPages()) {
-      pageW2 = pageW[state->getScrollPage()];
-      pageH2 = pageH[state->getScrollPage()];
+    pageW1 = pageW[leftPg - 1];
+    pageH1 = pageH[leftPg - 1];
+    if (leftPg + 1 <= state->getDoc()->getNumPages()) {
+      pageW2 = pageW[leftPg];
+      pageH2 = pageH[leftPg];
     } else {
       // display a single page as though there were a blank facing
       // page of the same size
@@ -819,13 +816,12 @@ GBool TileMap::cvtDevToWindow(int pg, int xd, int yd,
     } else {
       offsetY = 0;
     }
-    if (pg == state->getScrollPage()) {
+    if (pg == leftPg) {
       *xw = xd + offsetX - state->getScrollX();
-      *yw = yd + offsetY - state->getScrollY();
     } else {
       *xw = xd + offsetX2 - state->getScrollX();
-      *yw = yd + offsetY - state->getScrollY();
     }
+    *yw = yd + offsetY - state->getScrollY();
     break;
 
   case displaySideBySideContinuous:
@@ -903,7 +899,7 @@ void TileMap::cvtDevToUser(int pg, int xd, int yd, double *xu, double *yu) {
 
 void TileMap::getWindowPageRange(int x, int y, int w, int h,
 				 int *firstPage, int *lastPage) {
-  GList *tiles;
+  GList *tiles2;
   PlacedTileDesc *tile;
   int i;
 
@@ -913,9 +909,9 @@ void TileMap::getWindowPageRange(int x, int y, int w, int h,
   }
   *firstPage = state->getDoc()->getNumPages();
   *lastPage = 0;
-  tiles = getTileList();
-  for (i = 0; i < tiles->getLength(); ++i) {
-    tile = (PlacedTileDesc *)tiles->get(i);
+  tiles2 = getTileList();
+  for (i = 0; i < tiles2->getLength(); ++i) {
+    tile = (PlacedTileDesc *)tiles2->get(i);
     if (tile->px < x + w &&
 	tile->px + tile->tw > x &&
 	tile->py < y + h &&
@@ -1352,7 +1348,7 @@ void TileMap::updatePageParams() {
       // rotate the page boxes
       if (page & 1) {
 	otherPage = page + 1;
-	if (otherPage >= state->getDoc()->getNumPages()) {
+	if (otherPage > state->getDoc()->getNumPages()) {
 	  otherPage = page;
 	}
       } else {

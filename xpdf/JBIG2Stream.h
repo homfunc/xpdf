@@ -11,10 +11,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma interface
-#endif
-
 #include "gtypes.h"
 #include "Object.h"
 #include "Stream.h"
@@ -45,9 +41,11 @@ public:
   virtual GString *getPSFilter(int psLevel, const char *indent,
 			       GBool okToReadStream);
   virtual GBool isBinary(GBool last = gTrue);
+  virtual GBool hasStrongCompression() { return gTrue; }
 
 private:
 
+  void decodeImage();
   void readSegments();
   GBool readSymbolDictSeg(Guint segNum, Guint length,
 			  Guint *refSegs, Guint nRefSegs);
@@ -117,6 +115,7 @@ private:
   GBool readULong(Guint *x);
   GBool readLong(int *x);
 
+  GBool decoded;
   Object globalsStream;
   Guint pageW, pageH, curPageH;
   Guint pageDefPixel;

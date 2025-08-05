@@ -11,10 +11,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma interface
-#endif
-
 #include "gtypes.h"
 #include "GString.h"
 #include "Object.h"
@@ -29,6 +25,7 @@ class FoFiTrueType;
 class FoFiType1C;
 struct GfxFontCIDWidths;
 struct Base14FontMapEntry;
+class GfxFontDictEntry;
 class FNVHash;
 
 //------------------------------------------------------------------------
@@ -134,6 +131,10 @@ public:
   // Build a GfxFont object.
   static GfxFont *makeFont(XRef *xref, const char *tagA,
 			   Ref idA, Dict *fontDict);
+
+  // Create a simple default font, to substitute for an undefined font
+  // object.
+  static GfxFont *makeDefaultFont(XRef *xref);
 
   GfxFont(const char *tagA, Ref idA, GString *nameA,
 	  GfxFontType typeA, Ref embFontIDA);
@@ -357,6 +358,7 @@ public:
 
 private:
 
+  void readTrueTypeUnicodeMapping(XRef *xref);
   void getHorizontalMetrics(CID cid, double *w);
   void getVerticalMetrics(CID cid, double *h,
 			  double *vx, double *vy);
@@ -383,7 +385,7 @@ class GfxFontDict {
 public:
 
   // Build the font dictionary, given the PDF font dictionary.
-  GfxFontDict(XRef *xref, Ref *fontDictRef, Dict *fontDict);
+  GfxFontDict(XRef *xrefA, Ref *fontDictRef, Dict *fontDict);
 
   // Destructor.
   ~GfxFontDict();
@@ -398,13 +400,20 @@ public:
 
 private:
 
-  int hashFontObject(Object *obj);
-  void hashFontObject1(Object *obj, FNVHash *h);
+  friend class GfxFont;
 
-  GHash *fonts;			// hash table of fonts -- this may
-				//   include duplicates, i.e., when
-				//   two tags map to the same font
+  void loadAll();
+  void load(char *tag, GfxFontDictEntry *entry);
+  static int hashFontObject(Object *obj);
+  static void hashFontObject1(Object *obj, FNVHash *h);
+
+  XRef *xref;
+  GHash *fonts;			// hash table of fonts, mapping from
+				//   tag to GfxFontDictEntry; this may
+				//   contain duplicates, i.e., two
+				//   tags that map to the same font
   GList *uniqueFonts;		// list of all unique font objects (no dups)
+				//   that have been loaded
 };
 
 #endif

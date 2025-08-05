@@ -1,7 +1,7 @@
-.\" Copyright 1996-2021 Glyph & Cog, LLC
-.TH xpdf 1 "28 Jan 2021"
+.\" Copyright 1996-2024 Glyph & Cog, LLC
+.TH xpdf 1 "08 Feb 2024"
 .SH NAME
-xpdf \- Portable Document Format (PDF) file viewer (version 4.03)
+xpdf \- Portable Document Format (PDF) file viewer (version 4.05)
 .SH SYNOPSIS
 .B xpdf
 [options]
@@ -61,8 +61,8 @@ xpdf
 .SH CONFIGURATION FILE
 Xpdf reads a configuration file at startup.  It first tries to find
 the user's private config file, ~/.xpdfrc.  If that doesn't exist, it
-looks for a system-wide config file, typically /usr/local/etc/xpdfrc
-(but this location can be changed when xpdf is built).  See the
+looks for a system-wide config file, typically /etc/xpdfrc (but this
+location can be changed when xpdf is built).  See the
 .BR xpdfrc (5)
 man page for details.
 .SH OPTIONS
@@ -146,7 +146,7 @@ password.
 Open xpdf in full-screen mode, useful for presentations.
 .TP
 .BI \-remote " remote-name"
-Start Xpdf in remote server mode.  See the REMOVE SERVER MODE section.
+Start Xpdf in remote server mode.  See the REMOTE SERVER MODE section.
 .TP
 .BI \-display " display"
 Set the X display (only available with X11).
@@ -221,8 +221,9 @@ Find the next occurrence of the search string.
 Find the previous occurrence of the search string.
 .TP
 .B "find settings button"
-Display the current find settings: case sensitive (on/off), find whole
-words (on/off).
+Display the current find settings: case insensitive, case sensitive,
+smart case (case sensitive only if the search string contains
+uppercase characters), find whole words.
 .PP
 .SS Menu bar
 The menu bar is above the toolbar.  The menu items should be
@@ -551,6 +552,9 @@ Go to the specified page.
 .BI help
 Open the help URL.
 .TP
+.B hideMenuBar
+Hide the menu bar.
+.TP
 .B hideToolbar
 Hide the toolbar.
 .TP
@@ -560,6 +564,10 @@ Switch to horizontal continuous view mode.
 .B linearSelectMode
 Set linear selection mode.  In this mode, the selection follows text.
 Non-text regions cannot be selected.
+.TP
+.B loadSession
+Load the session from the session save file.  The path for the session file is specified with the sessionFile setting (see
+.BR xpdfrc (5)).
 .TP
 .BI loadTabState
 Load the tab state file (which was written via the saveTabState
@@ -590,6 +598,25 @@ Open the error window.
 .TP
 .BI openFile( file )
 Open the specified file in the current tab.
+.TP
+.BI openFile2( file, page, dest, passwd, location )
+Open the specified file.  If
+.I dest
+is not empty, go to the specified named destination.  Else, if
+.I page
+is not empty, go to the specified page number.  If
+.I password
+is not empty, it is used as the PDF password.  If
+.I location
+is "win", open the file in a new window; if it is "tab", open in a new
+tab; if it is "check", open in the current tab, but only if the
+specified PDF file isn't already open; else open in the current tab.
+Any/all of the arguments, other than
+.IR file ,
+can be empty strings.  For example:
+.nf
+openFile2(test.pdf,7,,,tab)
+.fi
 .TP
 .BI openFileAtDest( file, dest )
 Open the specified file in the current tab at the specified named
@@ -708,6 +735,13 @@ Save PDF via a file requester.
 .B saveImage
 Open the \'save image' dialog.
 .TP
+.B saveSession
+Save the current session, consisting of all open windows and tabs, to
+the session save file.  This file can be loaded later with the
+loadSession command.  The path for the session file is specified with
+the sessionFile setting (see
+.BR xpdfrc (5)).
+.TP
 .BI saveTabState
 Save a list of all tabs open in this window to the tab state file.
 For each tab, this writes the PDF file name and page number (on
@@ -787,8 +821,23 @@ Set the selection to the word at the current mouse position.
 .BI setSelection( pg , ulx , uly , lrx , lry )
 Set the selection to the specified coordinates on the specified page.
 .TP
+.B showAttachmentsPane
+Shows the attachments in the outline/layers/attachments pane.
+.TP
+.B showDocumentInfo
+Open the document information dialog.
+.TP
 .B showKeyBindings
 Open the key bindings dialog.
+.TP
+.B showLayersPane
+Shows the layers in the outline/layers/attachments pane.
+.TP
+.B showMenuBar
+Show the menu bar.
+.TP
+.B showOutlinePane
+Shows the outline in the outline/layers/attachments pane.
 .TP
 .B showToolbar
 Show the toolbar.
@@ -825,6 +874,9 @@ Toggle between continuous and single page view modes.
 .TP
 .B toggleFullScreenMode
 Toggle between full-screen and window modes.
+.TP
+.B toggleMenuBar
+Toggle the menu bar between shown and hidden.
 .TP
 .B toggleSelectMode
 Toggle between block and linear selection mode.
@@ -908,7 +960,7 @@ Error related to PDF permissions.
 99
 Other error.
 .SH AUTHOR
-The xpdf software and documentation are copyright 1996-2021 Glyph &
+The xpdf software and documentation are copyright 1996-2024 Glyph &
 Cog, LLC.
 .SH "SEE ALSO"
 .BR pdftops (1),

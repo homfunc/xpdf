@@ -23,6 +23,11 @@ if (HAVE_LCMS)
 else ()
   set(COLOR_MANAGER_SOURCE "")
 endif ()
+if (WIN32)
+  set(MANIFEST "winLongPath.exe.manifest")
+else ()
+  set(MANIFEST "")
+endif ()
 
 add_library(xpdf_objs OBJECT
   AcroForm.cc
@@ -70,10 +75,12 @@ add_library(xpdf_objs OBJECT
   XRef.cc
   Zoox.cc
 )
+set_property(TARGET xpdf_objs
+             PROPERTY POSITION_INDEPENDENT_CODE True)
 
-#--- object files needed by XpdfWidget
-#
-#if ((QT4_FOUND OR Qt5Widgets_FOUND)
+##--- object files needed by XpdfWidget
+
+#if ((QT4_FOUND OR Qt5Widgets_FOUND OR Qt6Widgets_FOUND)
 #    AND HAVE_SPLASH AND MULTITHREADED AND USE_EXCEPTIONS)
 #
 #  if (HIGHLIGHTED_REGIONS)
@@ -95,6 +102,8 @@ add_library(xpdf_objs OBJECT
 #    TileMap.cc
 #    ${HIGHLIGHT_SRC}
 #  )
+#  set_property(TARGET xpdf_widget_objs
+#               PROPERTY POSITION_INDEPENDENT_CODE True)
 #endif ()
 
 ##--- pdftops
@@ -107,6 +116,7 @@ add_library(xpdf_objs OBJECT
 #    ShadingImage.cc
 #    SplashOutputDev.cc
 #    pdftops.cc
+#    ${MANIFEST}
 #  )
 #  target_link_libraries(pdftops goo fofi splash
 #                        ${PAPER_LIBRARY}
@@ -137,6 +147,7 @@ add_library(xpdf_objs OBJECT
 #  $<TARGET_OBJECTS:xpdf_objs>
 #  TextOutputDev.cc
 #  pdftotext.cc
+#  ${MANIFEST}
 #)
 #target_link_libraries(pdftotext goo fofi
 #                      ${PAPER_LIBRARY}
@@ -157,6 +168,7 @@ add_library(xpdf_objs OBJECT
 #    TextOutputDev.cc
 #    WebFont.cc
 #    pdftohtml.cc
+#    ${MANIFEST}
 #  )
 #  target_link_libraries(pdftohtml goo fofi splash
 #                        ${PAPER_LIBRARY}
@@ -175,6 +187,7 @@ add_library(xpdf_objs OBJECT
 #add_executable(pdfinfo
 #  $<TARGET_OBJECTS:xpdf_objs>
 #  pdfinfo.cc
+#  ${MANIFEST}
 #)
 #target_link_libraries(pdfinfo goo fofi
 #                      ${PAPER_LIBRARY}
@@ -189,6 +202,7 @@ add_library(xpdf_objs OBJECT
 #add_executable(pdffonts
 #  $<TARGET_OBJECTS:xpdf_objs>
 #  pdffonts.cc
+#  ${MANIFEST}
 #)
 #target_link_libraries(pdffonts goo fofi
 #                      ${PAPER_LIBRARY}
@@ -203,6 +217,7 @@ add_library(xpdf_objs OBJECT
 #add_executable(pdfdetach
 #  $<TARGET_OBJECTS:xpdf_objs>
 #  pdfdetach.cc
+#  ${MANIFEST}
 #)
 #target_link_libraries(pdfdetach goo fofi
 #                      ${PAPER_LIBRARY}
@@ -240,6 +255,7 @@ add_library(xpdf_objs OBJECT
 #    ShadingImage.cc
 #    SplashOutputDev.cc
 #    pdftopng.cc
+#    ${MANIFEST}
 #  )
 #  target_link_libraries(pdftopng goo fofi splash
 #                        ${PAPER_LIBRARY}
@@ -259,6 +275,7 @@ add_library(xpdf_objs OBJECT
 #  $<TARGET_OBJECTS:xpdf_objs>
 #  ImageOutputDev.cc
 #  pdfimages.cc
+#  ${MANIFEST}
 #)
 #target_link_libraries(pdfimages goo fofi
 #                      ${PAPER_LIBRARY}

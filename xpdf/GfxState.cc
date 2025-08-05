@@ -8,10 +8,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma implementation
-#endif
-
 #include <stddef.h>
 #include <math.h>
 #include <string.h>
@@ -936,15 +932,15 @@ GfxColorSpace *GfxICCBasedColorSpace::parse(Array *arr,
   }
   nCompsA = obj2.getInt();
   obj2.free();
-  if (nCompsA > 4) {
-    error(errSyntaxError, -1,
-	  "ICCBased color space with too many ({0:d} > 4) components",
-	  nCompsA);
-    nCompsA = 4;
-  }
-  if (dict->lookup("Alternate", &obj2)->isNull() ||
-      !(altA = GfxColorSpace::parse(&obj2,
-				    recursion + 1))) {
+  if (!dict->lookup("Alternate", &obj2)->isNull() &&
+      (altA = GfxColorSpace::parse(&obj2,
+				   recursion + 1))) {
+    if (altA->getNComps() != nCompsA) {
+      error(errSyntaxError, -1,
+	    "Number of components in ICCBased color space doesn't match alternate color space");
+      nCompsA = altA->getNComps();
+    }
+  } else {
     switch (nCompsA) {
     case 1:
       altA = GfxColorSpace::create(csDeviceGray);
@@ -1784,6 +1780,258 @@ GfxPattern *GfxTilingPattern::copy() {
 			      &resDict, matrix, &contentStreamRef);
 }
 
+GBool GfxTilingPattern::usesBlendMode(XRef *xref) {
+  char *scannedObjs = (char *)gmalloc(xref->getNumObjects());
+  memset(scannedObjs, 0, xref->getNumObjects());
+  GBool ret = scanResourcesForBlendMode(&resDict, scannedObjs, xref);
+  gfree(scannedObjs);
+  return ret;
+}
+
+GBool GfxTilingPattern::scanResourcesForBlendMode(Object *resDict2,
+						  char *scannedObjs,
+						  XRef *xref) {
+  Object ref1, obj1, obj2;
+
+  if (!resDict2->isDict()) {
+    return gFalse;
+  }
+
+  //----- ExtGStates
+  resDict2->dictLookupNF("ExtGState", &ref1);
+  if (!ref1.isRef() || (ref1.getRefNum() < xref->getNumObjects() &&
+			!scannedObjs[ref1.getRefNum()])) {
+    if (ref1.isRef()) {
+      scannedObjs[ref1.getRefNum()] = 1;
+      ref1.fetch(xref, &obj1);
+    } else {
+      ref1.copy(&obj1);
+    }
+    if (obj1.isDict()) {
+      for (int i = 0; i < obj1.dictGetLength(); ++i) {
+	if (scanExtGStateForBlendMode(obj1.dictGetValNF(i, &obj2),
+				      scannedObjs, xref)) {
+	  obj2.free();
+	  obj1.free();
+	  ref1.free();
+	  return gTrue;
+	}
+	obj2.free();
+      }
+    }
+    obj1.free();
+  }
+  ref1.free();
+
+  //----- patterns
+  resDict2->dictLookupNF("Pattern", &ref1);
+  if (!ref1.isRef() || (ref1.getRefNum() < xref->getNumObjects() &&
+			!scannedObjs[ref1.getRefNum()])) {
+    if (ref1.isRef()) {
+      scannedObjs[ref1.getRefNum()] = 1;
+      ref1.fetch(xref, &obj1);
+    } else {
+      ref1.copy(&obj1);
+    }
+    if (obj1.isDict()) {
+      for (int i = 0; i < obj1.dictGetLength(); ++i) {
+	if (scanPatternForBlendMode(obj1.dictGetValNF(i, &obj2),
+				    scannedObjs, xref)) {
+	  obj2.free();
+	  obj1.free();
+	  ref1.free();
+	  return gTrue;
+	}
+	obj2.free();
+      }
+    }
+    obj1.free();
+  }
+  ref1.free();
+
+  //----- XObjects
+  resDict2->dictLookupNF("XObject", &ref1);
+  if (!ref1.isRef() || (ref1.getRefNum() < xref->getNumObjects() &&
+			!scannedObjs[ref1.getRefNum()])) {
+    if (ref1.isRef()) {
+      scannedObjs[ref1.getRefNum()] = 1;
+      ref1.fetch(xref, &obj1);
+    } else {
+      ref1.copy(&obj1);
+    }
+    if (obj1.isDict()) {
+      for (int i = 0; i < obj1.dictGetLength(); ++i) {
+	if (scanXObjectForBlendMode(obj1.dictGetValNF(i, &obj2),
+				    scannedObjs, xref)) {
+	  obj2.free();
+	  obj1.free();
+	  ref1.free();
+	  return gTrue;
+	}
+	obj2.free();
+      }
+    }
+    obj1.free();
+  }
+  ref1.free();
+
+  return gFalse;
+}
+
+GBool GfxTilingPattern::scanExtGStateForBlendMode(Object *gsObj,
+						  char *scannedObjs,
+						  XRef *xref) {
+  Object gsDict, obj1;
+
+  if (gsObj->isRef()) {
+    if (gsObj->getRefNum() >= xref->getNumObjects() ||
+	scannedObjs[gsObj->getRefNum()]) {
+      return gFalse;
+    }
+    scannedObjs[gsObj->getRefNum()] = 1;
+    gsObj->fetch(xref, &gsDict);
+  } else {
+    gsObj->copy(&gsDict);
+  }
+  if (!gsDict.isDict()) {
+    gsDict.free();
+    return gFalse;
+  }
+
+  gsDict.dictLookup("BM", &obj1);
+  if (obj1.isName() && !obj1.isName("Normal")) {
+    obj1.free();
+    gsDict.free();
+    return gTrue;
+  }
+  obj1.free();
+
+  if (!gsDict.dictLookupNF("SMask", &obj1)->isNull()) {
+    if (scanSoftMaskForBlendMode(&obj1, scannedObjs, xref)) {
+      obj1.free();
+      gsDict.free();
+      return gTrue;
+    }
+  }
+  obj1.free();
+
+  gsDict.free();
+
+  return gFalse;
+}
+
+GBool GfxTilingPattern::scanSoftMaskForBlendMode(Object *softMaskObj,
+						 char *scannedObjs,
+						 XRef *xref) {
+  Object softMaskDict, obj1;
+
+  if (softMaskObj->isRef()) {
+    if (softMaskObj->getRefNum() >= xref->getNumObjects() ||
+	scannedObjs[softMaskObj->getRefNum()]) {
+      return gFalse;
+    }
+    scannedObjs[softMaskObj->getRefNum()] = 1;
+    softMaskObj->fetch(xref, &softMaskDict);
+  } else {
+    softMaskObj->copy(&softMaskDict);
+  }
+  if (!softMaskDict.isDict()) {
+    softMaskDict.free();
+    return gFalse;
+  }
+
+  if (!softMaskDict.dictLookupNF("G", &obj1)->isNull()) {
+    if (scanXObjectForBlendMode(&obj1, scannedObjs, xref)) {
+      obj1.free();
+      softMaskDict.free();
+      return gTrue;
+    }
+  }
+  obj1.free();
+
+  softMaskDict.free();
+
+  return gFalse;
+}
+
+GBool GfxTilingPattern::scanPatternForBlendMode(Object *patternObj,
+						char *scannedObjs,
+						XRef *xref) {
+  Object patternObj2, obj1;
+  Dict *patternDict;
+
+  if (patternObj->isRef()) {
+    if (patternObj->getRefNum() >= xref->getNumObjects() ||
+	scannedObjs[patternObj->getRefNum()]) {
+      return gFalse;
+    }
+    scannedObjs[patternObj->getRefNum()] = 1;
+    patternObj->fetch(xref, &patternObj2);
+  } else {
+    patternObj->copy(&patternObj2);
+  }
+  if (patternObj2.isDict()) {
+    patternDict = patternObj2.getDict();
+  } else if (patternObj2.isStream()) {
+    patternDict = patternObj2.streamGetDict();
+  } else {
+    patternObj2.free();
+    return gFalse;
+  }
+
+  if (!patternDict->lookupNF("Resources", &obj1)->isNull()) {
+    if (scanResourcesForBlendMode(&obj1, scannedObjs, xref)) {
+      obj1.free();
+      patternObj2.free();
+      return gTrue;
+    }
+  }
+  obj1.free();
+
+  patternObj2.free();
+
+  return gFalse;
+}
+
+GBool GfxTilingPattern::scanXObjectForBlendMode(Object *xObj,
+						char *scannedObjs,
+						XRef *xref) {
+  Object xObj2, obj1;
+  Dict *dict;
+
+  if (xObj->isRef()) {
+    if (xObj->getRefNum() >= xref->getNumObjects() ||
+	scannedObjs[xObj->getRefNum()]) {
+      return gFalse;
+    }
+    scannedObjs[xObj->getRefNum()] = 1;
+    xObj->fetch(xref, &xObj2);
+  } else {
+    xObj->copy(&xObj2);
+  }
+  if (xObj2.isDict()) {
+    dict = xObj2.getDict();
+  } else if (xObj2.isStream()) {
+    dict = xObj2.streamGetDict();
+  } else {
+    xObj2.free();
+    return gFalse;
+  }
+
+  if (!dict->lookupNF("Resources", &obj1)->isNull()) {
+    if (scanResourcesForBlendMode(&obj1, scannedObjs, xref)) {
+      obj1.free();
+      xObj2.free();
+      return gTrue;
+    }
+  }
+  obj1.free();
+
+  xObj2.free();
+
+  return gFalse;
+}
+
 //------------------------------------------------------------------------
 // GfxShadingPattern
 //------------------------------------------------------------------------
@@ -2071,6 +2319,7 @@ GfxFunctionShading *GfxFunctionShading::parse(Dict *dict
   Function *funcsA[gfxColorMaxComps];
   int nFuncsA;
   Object obj1, obj2;
+  GBool ok;
   int i;
 
   x0A = y0A = 0;
@@ -2139,13 +2388,20 @@ GfxFunctionShading *GfxFunctionShading::parse(Dict *dict
     return NULL;
   }
 
-  for (i = 0; i < shading->nFuncs; ++i) {
-    if (shading->funcs[i]->getOutputSize()
-	!= shading->getColorSpace()->getNComps()) {
-      error(errSyntaxError, -1, "Invalid function in shading dictionary");
-      delete shading;
-      return NULL;
+  ok = gFalse;
+  if (shading->nFuncs == 1) {
+    ok = shading->funcs[0]->getOutputSize()
+           == shading->getColorSpace()->getNComps();
+  } else if (shading->nFuncs == shading->getColorSpace()->getNComps()) {
+    ok = gTrue;
+    for (i = 0; i < shading->nFuncs; ++i) {
+      ok = ok && shading->funcs[i]->getOutputSize() == 1;
     }
+  }
+  if (!ok) {
+    error(errSyntaxError, -1, "Invalid function in shading dictionary");
+    delete shading;
+    return NULL;
   }
 
   return shading;
@@ -2241,7 +2497,7 @@ GfxAxialShading *GfxAxialShading::parse(Dict *dict
   double t0A, t1A;
   Function *funcsA[gfxColorMaxComps];
   int nFuncsA;
-  GBool extend0A, extend1A;
+  GBool extend0A, extend1A, ok;
   Object obj1, obj2;
   int i;
 
@@ -2319,13 +2575,20 @@ GfxAxialShading *GfxAxialShading::parse(Dict *dict
     return NULL;
   }
 
-  for (i = 0; i < shading->nFuncs; ++i) {
-    if (shading->funcs[i]->getOutputSize()
-	!= shading->getColorSpace()->getNComps()) {
-      error(errSyntaxError, -1, "Invalid function in shading dictionary");
-      delete shading;
-      return NULL;
+  ok = gFalse;
+  if (shading->nFuncs == 1) {
+    ok = shading->funcs[0]->getOutputSize()
+           == shading->getColorSpace()->getNComps();
+  } else if (shading->nFuncs == shading->getColorSpace()->getNComps()) {
+    ok = gTrue;
+    for (i = 0; i < shading->nFuncs; ++i) {
+      ok = ok && shading->funcs[i]->getOutputSize() == 1;
     }
+  }
+  if (!ok) {
+    error(errSyntaxError, -1, "Invalid function in shading dictionary");
+    delete shading;
+    return NULL;
   }
 
   return shading;
@@ -2420,7 +2683,7 @@ GfxRadialShading *GfxRadialShading::parse(Dict *dict
   double t0A, t1A;
   Function *funcsA[gfxColorMaxComps];
   int nFuncsA;
-  GBool extend0A, extend1A;
+  GBool extend0A, extend1A, ok;
   Object obj1, obj2;
   int i;
 
@@ -2501,13 +2764,20 @@ GfxRadialShading *GfxRadialShading::parse(Dict *dict
     return NULL;
   }
 
-  for (i = 0; i < shading->nFuncs; ++i) {
-    if (shading->funcs[i]->getOutputSize()
-	!= shading->getColorSpace()->getNComps()) {
-      error(errSyntaxError, -1, "Invalid function in shading dictionary");
-      delete shading;
-      return NULL;
+  ok = gFalse;
+  if (shading->nFuncs == 1) {
+    ok = shading->funcs[0]->getOutputSize()
+           == shading->getColorSpace()->getNComps();
+  } else if (shading->nFuncs == shading->getColorSpace()->getNComps()) {
+    ok = gTrue;
+    for (i = 0; i < shading->nFuncs; ++i) {
+      ok = ok && shading->funcs[i]->getOutputSize() == 1;
     }
+  }
+  if (!ok) {
+    error(errSyntaxError, -1, "Invalid function in shading dictionary");
+    delete shading;
+    return NULL;
   }
 
   return shading;
@@ -2675,6 +2945,7 @@ GfxGouraudTriangleShading *GfxGouraudTriangleShading::parse(
   Guint c[gfxColorMaxComps];
   GfxShadingBitBuf *bitBuf;
   Object obj1, obj2;
+  GBool ok;
   int i, j, k, state;
 
   if (dict->lookup("BitsPerCoordinate", &obj1)->isInt()) {
@@ -2883,13 +3154,22 @@ GfxGouraudTriangleShading *GfxGouraudTriangleShading::parse(
     return NULL;
   }
 
-  for (i = 0; i < shading->nFuncs; ++i) {
-    if (shading->funcs[i]->getOutputSize()
-	!= shading->getColorSpace()->getNComps()) {
-      error(errSyntaxError, -1, "Invalid function in shading dictionary");
-      delete shading;
-      return NULL;
+  ok = gFalse;
+  if (shading->nFuncs == 0) {
+    ok = shading->nComps == shading->getColorSpace()->getNComps();
+  } else if (shading->nFuncs == 1) {
+    ok = shading->funcs[0]->getOutputSize()
+           == shading->getColorSpace()->getNComps();
+  } else if (shading->nFuncs == shading->getColorSpace()->getNComps()) {
+    ok = gTrue;
+    for (i = 0; i < shading->nFuncs; ++i) {
+      ok = ok && shading->funcs[i]->getOutputSize() == 1;
     }
+  }
+  if (!ok) {
+    error(errSyntaxError, -1, "Invalid function in shading dictionary");
+    delete shading;
+    return NULL;
   }
 
   return shading;
@@ -2931,8 +3211,8 @@ void GfxGouraudTriangleShading::getTriangle(
   }
 }
 
-void GfxGouraudTriangleShading::getBBox(double *xMin, double *yMin,
-					double *xMax, double *yMax) {
+void GfxGouraudTriangleShading::getBBox(double *xMinA, double *yMinA,
+					double *xMaxA, double *yMaxA) {
   double xxMin = 0;
   double yyMin = 0;
   double xxMax = 0;
@@ -2953,10 +3233,10 @@ void GfxGouraudTriangleShading::getBBox(double *xMin, double *yMin,
       yyMax = vertices[i].y;
     }
   }
-  *xMin = xxMin;
-  *yMin = yyMin;
-  *xMax = xxMax;
-  *yMax = yyMax;
+  *xMinA = xxMin;
+  *yMinA = yyMin;
+  *xMaxA = xxMax;
+  *yMaxA = yyMax;
 }
 
 void GfxGouraudTriangleShading::getColor(double *in, GfxColor *out) {
@@ -3042,6 +3322,7 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
   Guint ci;
   GfxShadingBitBuf *bitBuf;
   Object obj1, obj2;
+  GBool ok;
   int i, j;
 
   nPatchesA = 0;
@@ -3555,13 +3836,22 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
     return NULL;
   }
 
-  for (i = 0; i < shading->nFuncs; ++i) {
-    if (shading->funcs[i]->getOutputSize()
-	!= shading->getColorSpace()->getNComps()) {
-      error(errSyntaxError, -1, "Invalid function in shading dictionary");
-      delete shading;
-      return NULL;
+  ok = gFalse;
+  if (shading->nFuncs == 0) {
+    ok = shading->nComps == shading->getColorSpace()->getNComps();
+  } else if (shading->nFuncs == 1) {
+    ok = shading->funcs[0]->getOutputSize()
+           == shading->getColorSpace()->getNComps();
+  } else if (shading->nFuncs == shading->getColorSpace()->getNComps()) {
+    ok = gTrue;
+    for (i = 0; i < shading->nFuncs; ++i) {
+      ok = ok && shading->funcs[i]->getOutputSize() == 1;
     }
+  }
+  if (!ok) {
+    error(errSyntaxError, -1, "Invalid function in shading dictionary");
+    delete shading;
+    return NULL;
   }
 
   return shading;
@@ -3579,8 +3869,8 @@ GfxShading *GfxPatchMeshShading::copy() {
   return new GfxPatchMeshShading(this);
 }
 
-void GfxPatchMeshShading::getBBox(double *xMin, double *yMin,
-				  double *xMax, double *yMax) {
+void GfxPatchMeshShading::getBBox(double *xMinA, double *yMinA,
+				  double *xMaxA, double *yMaxA) {
   double xxMin = 0;
   double yyMin = 0;
   double xxMax = 0;
@@ -3605,10 +3895,10 @@ void GfxPatchMeshShading::getBBox(double *xMin, double *yMin,
       }
     }
   }
-  *xMin = xxMin;
-  *yMin = yyMin;
-  *xMax = xxMax;
-  *yMax = yyMax;
+  *xMinA = xxMin;
+  *yMinA = yyMin;
+  *xMaxA = xxMax;
+  *yMaxA = yyMax;
 }
 
 void GfxPatchMeshShading::getColor(double *in, GfxColor *out) {
@@ -4089,6 +4379,26 @@ GfxPath::GfxPath(GBool justMoved1, double firstX1, double firstY1,
   subpaths = (GfxSubpath **)gmallocn(size, sizeof(GfxSubpath *));
   for (i = 0; i < n; ++i)
     subpaths[i] = subpaths1[i]->copy();
+}
+
+double GfxPath::getCurX() {
+  if (justMoved) {
+    return firstX;
+  } else if (n > 0) {
+    return subpaths[n-1]->getLastX();
+  } else {
+    return 0;
+  }
+}
+
+double GfxPath::getCurY() {
+  if (justMoved) {
+    return firstY;
+  } else if (n > 0) {
+    return subpaths[n-1]->getLastY();
+  } else {
+    return 0;
+  }
 }
 
 void GfxPath::moveTo(double x, double y) {
@@ -4581,65 +4891,149 @@ void GfxState::clip() {
 }
 
 void GfxState::clipToStrokePath() {
-  double xMin, yMin, xMax, yMax, x, y, t0, t1;
-  GfxSubpath *subpath;
-  int i, j;
-
-  xMin = xMax = yMin = yMax = 0; // make gcc happy
-  for (i = 0; i < path->getNumSubpaths(); ++i) {
-    subpath = path->getSubpath(i);
-    for (j = 0; j < subpath->getNumPoints(); ++j) {
-      transform(subpath->getX(j), subpath->getY(j), &x, &y);
+  // We compute the stroke path bbox in user space (line width and
+  // miter limt are handled in user space), and then transform the
+  // bbox to device space.  This can result in a larger-than-needed
+  // bbox if the matrix isn't "square", but that's ok.
+  //
+  // There are two cases for each point on the path:
+  // (1) miter join, under miter limit => compute the miter point
+  // (2) all other joins and caps => use the path point +/- 0.5 * line width
+  double uxMin = 0, uyMin = 0, uxMax = 0, uyMax = 0;
+  double w = 0.5 * lineWidth;
+  for (int i = 0; i < path->getNumSubpaths(); ++i) {
+    GfxSubpath *subpath = path->getSubpath(i);
+    int nPoints;
+    if (subpath->isClosed()) {
+      nPoints = subpath->getNumPoints() - 1;
+    } else {
+      nPoints = subpath->getNumPoints();
+    }
+    for (int j = 0; j < nPoints; ++j) {
+      double x1 = subpath->getX(j);
+      double y1 = subpath->getY(j);
       if (i == 0 && j == 0) {
-	xMin = xMax = x;
-	yMin = yMax = y;
-      } else {
-	if (x < xMin) {
-	  xMin = x;
-	} else if (x > xMax) {
-	  xMax = x;
+	uxMin = uxMax = x1;
+	uyMin = uyMax = y1;
+      }
+      GBool useMiter = gFalse;
+      if (lineJoin == 0 &&  // miter join
+	  (subpath->isClosed() || (j > 0 && j < subpath->getNumPoints() - 1))) {
+	double x0, y0, x2, y2;
+	if (j == 0) {
+	  x0 = subpath->getX(nPoints - 1);
+	  y0 = subpath->getY(nPoints - 1);
+	} else {
+	  x0 = subpath->getX(j - 1);
+	  y0 = subpath->getY(j - 1);
 	}
-	if (y < yMin) {
-	  yMin = y;
-	} else if (y > yMax) {
-	  yMax = y;
+	x2 = subpath->getX(j + 1);
+	y2 = subpath->getY(j + 1);
+	if ((fabs(x1 - x0) > 0.0001 || fabs(y1 - y0) > 0.0001) &&
+	    (fabs(x2 - x1) > 0.0001 || fabs(y2 - y1) > 0.0001)) {
+	  double d01 = 1 / sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+	  double ux = (x1 - x0) * d01;
+	  double uy = (y1 - y0) * d01;
+	  double d12 = 1 / sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+	  double vx = (x2 - x1) * d12;
+	  double vy = (y2 - y1) * d12;
+	  double dot = -ux * vx - uy * vy;
+	  if (dot < 0.9999) {
+	    double miter = sqrt(2 / (1 - dot));
+	    if (miter <= miterLimit) {
+	      double cross = ux * vy - uy * vx;
+	      double m = sqrt(2 / (1 - dot) - 1);
+	      double ax, ay;
+	      if (cross >= 0) {
+		ax = x1 + w * uy;
+		ay = y1 - w * ux;
+	      } else {
+		ax = x1 - w * uy;
+		ay = y1 + w * ux;
+	      }
+	      double mx = ax + m * w * ux;
+	      double my = ay + m * w * uy;
+	      if (mx < uxMin) {
+		uxMin = mx;
+	      } else if (mx > uxMax) {
+		uxMax = mx;
+	      }
+	      if (my < uyMin) {
+		uyMin = my;
+	      } else if (my > uyMax) {
+		uyMax = my;
+	      }
+	      useMiter = gTrue;
+	    }
+	  }
+	}
+      }
+      if (!useMiter) {
+	if (x1 - w < uxMin) {
+	  uxMin = x1 - w;
+	}
+	if (x1 + w > uxMax) {
+	  uxMax = x1 + w;
+	}
+	if (y1 - w < uyMin) {
+	  uyMin = y1 - w;
+	}
+	if (y1 + w > uyMax) {
+	  uyMax = y1 + w;
 	}
       }
     }
   }
 
-  // allow for the line width
-  //~ miter joins can extend farther than this
-  t0 = fabs(ctm[0]);
-  t1 = fabs(ctm[2]);
-  if (t0 > t1) {
-    xMin -= 0.5 * lineWidth * t0;
-    xMax += 0.5 * lineWidth * t0;
-  } else {
-    xMin -= 0.5 * lineWidth * t1;
-    xMax += 0.5 * lineWidth * t1;
+  double dxMin, dyMin, dxMax, dyMax, xx, yy;
+  transform(uxMin, uyMin, &xx, &yy);
+  dxMin = dxMax = xx;
+  dyMin = dyMax = yy;
+  transform(uxMin, uyMax, &xx, &yy);
+  if (xx < dxMin) {
+    dxMin = xx;
+  } else if (xx > dxMax) {
+    dxMax = xx;
   }
-  t0 = fabs(ctm[0]);
-  t1 = fabs(ctm[3]);
-  if (t0 > t1) {
-    yMin -= 0.5 * lineWidth * t0;
-    yMax += 0.5 * lineWidth * t0;
-  } else {
-    yMin -= 0.5 * lineWidth * t1;
-    yMax += 0.5 * lineWidth * t1;
+  if (yy < dyMin) {
+    dyMin = yy;
+  } else if (yy > dyMax) {
+    dyMax = yy;
+  }
+  transform(uxMax, uyMin, &xx, &yy);
+  if (xx < dxMin) {
+    dxMin = xx;
+  } else if (xx > dxMax) {
+    dxMax = xx;
+  }
+  if (yy < dyMin) {
+    dyMin = yy;
+  } else if (yy > dyMax) {
+    dyMax = yy;
+  }
+  transform(uxMax, uyMax, &xx, &yy);
+  if (xx < dxMin) {
+    dxMin = xx;
+  } else if (xx > dxMax) {
+    dxMax = xx;
+  }
+  if (yy < dyMin) {
+    dyMin = yy;
+  } else if (yy > dyMax) {
+    dyMax = yy;
   }
 
-  if (xMin > clipXMin) {
-    clipXMin = xMin;
+  if (dxMin > clipXMin) {
+    clipXMin = dxMin;
   }
-  if (yMin > clipYMin) {
-    clipYMin = yMin;
+  if (dyMin > clipYMin) {
+    clipYMin = dyMin;
   }
-  if (xMax < clipXMax) {
-    clipXMax = xMax;
+  if (dxMax < clipXMax) {
+    clipXMax = dxMax;
   }
-  if (yMax < clipYMax) {
-    clipYMax = yMax;
+  if (dyMax < clipYMax) {
+    clipYMax = dyMax;
   }
 }
 

@@ -8,10 +8,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma implementation
-#endif
-
 #include <math.h>
 #include "gmempp.h"
 #include "GlobalParams.h"
@@ -248,13 +244,14 @@ void PreScanOutputDev::drawSoftMaskedImage(GfxState *state, Object *ref,
   gdi = gFalse;
 }
 
-void PreScanOutputDev::beginTransparencyGroup(
-			   GfxState *state, double *bbox,
-			   GfxColorSpace *blendingColorSpace,
-			   GBool isolated, GBool knockout,
-			   GBool forSoftMask) {
+GBool PreScanOutputDev::beginTransparencyGroup(
+			    GfxState *state, double *bbox,
+			    GfxColorSpace *blendingColorSpace,
+			    GBool isolated, GBool knockout,
+			    GBool forSoftMask) {
   transparency = gTrue;
   gdi = gFalse;
+  return gTrue;
 }
 
 void PreScanOutputDev::check(GfxState *state,

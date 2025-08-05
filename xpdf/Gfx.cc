@@ -8,10 +8,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma implementation
-#endif
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -527,6 +523,7 @@ Gfx::Gfx(PDFDoc *docA, OutputDev *outA, int pageNum, Dict *resDict,
   xref = doc->getXRef();
   subPage = gFalse;
   printCommands = globalParams->getPrintCommands();
+  defaultFont = NULL;
 
   // start the resource stack
   res = new GfxResources(xref, resDict, NULL);
@@ -535,6 +532,7 @@ Gfx::Gfx(PDFDoc *docA, OutputDev *outA, int pageNum, Dict *resDict,
   out = outA;
   state = new GfxState(hDPI, vDPI, box, rotate, out->upsideDown());
   fontChanged = gFalse;
+  haveSavedClipPath = gFalse;
   clip = clipNone;
   ignoreUndef = 0;
   out->startPage(pageNum, state);
@@ -574,6 +572,7 @@ Gfx::Gfx(PDFDoc *docA, OutputDev *outA, Dict *resDict,
   xref = doc->getXRef();
   subPage = gTrue;
   printCommands = globalParams->getPrintCommands();
+  defaultFont = NULL;
 
   // start the resource stack
   res = new GfxResources(xref, resDict, NULL);
@@ -582,6 +581,7 @@ Gfx::Gfx(PDFDoc *docA, OutputDev *outA, Dict *resDict,
   out = outA;
   state = new GfxState(72, 72, box, 0, gFalse);
   fontChanged = gFalse;
+  haveSavedClipPath = gFalse;
   clip = clipNone;
   ignoreUndef = 0;
   for (i = 0; i < 6; ++i) {
@@ -609,6 +609,9 @@ Gfx::Gfx(PDFDoc *docA, OutputDev *outA, Dict *resDict,
 }
 
 Gfx::~Gfx() {
+  if (defaultFont) {
+    delete defaultFont;
+  }
   if (!subPage) {
     out->endPage();
   }
@@ -1824,15 +1827,20 @@ void Gfx::opFillStroke(Object args[], int numArgs) {
   }
   if (state->isPath()) {
     if (ocState) {
-      if (state->getFillColorSpace()->getMode() == csPattern) {
-	doPatternFill(gFalse);
+      if (state->getFillColorSpace()->getMode() == csPattern ||
+	  state->getStrokeColorSpace()->getMode() == csPattern) {
+	if (state->getFillColorSpace()->getMode() == csPattern) {
+	  doPatternFill(gFalse);
+	} else {
+	  out->fill(state);
+	}
+	if (state->getStrokeColorSpace()->getMode() == csPattern) {
+	  doPatternStroke();
+	} else {
+	  out->stroke(state);
+	}
       } else {
-	out->fill(state);
-      }
-      if (state->getStrokeColorSpace()->getMode() == csPattern) {
-	doPatternStroke();
-      } else {
-	out->stroke(state);
+	out->fillStroke(state, gFalse);
       }
     }
   }
@@ -1847,15 +1855,20 @@ void Gfx::opCloseFillStroke(Object args[], int numArgs) {
   if (state->isPath()) {
     state->closePath();
     if (ocState) {
-      if (state->getFillColorSpace()->getMode() == csPattern) {
-	doPatternFill(gFalse);
+      if (state->getFillColorSpace()->getMode() == csPattern ||
+	  state->getStrokeColorSpace()->getMode() == csPattern) {
+	if (state->getFillColorSpace()->getMode() == csPattern) {
+	  doPatternFill(gFalse);
+	} else {
+	  out->fill(state);
+	}
+	if (state->getStrokeColorSpace()->getMode() == csPattern) {
+	  doPatternStroke();
+	} else {
+	  out->stroke(state);
+	}
       } else {
-	out->fill(state);
-      }
-      if (state->getStrokeColorSpace()->getMode() == csPattern) {
-	doPatternStroke();
-      } else {
-	out->stroke(state);
+	out->fillStroke(state, gFalse);
       }
     }
   }
@@ -1869,15 +1882,20 @@ void Gfx::opEOFillStroke(Object args[], int numArgs) {
   }
   if (state->isPath()) {
     if (ocState) {
-      if (state->getFillColorSpace()->getMode() == csPattern) {
-	doPatternFill(gTrue);
+      if (state->getFillColorSpace()->getMode() == csPattern ||
+	  state->getStrokeColorSpace()->getMode() == csPattern) {
+	if (state->getFillColorSpace()->getMode() == csPattern) {
+	  doPatternFill(gTrue);
+	} else {
+	  out->eoFill(state);
+	}
+	if (state->getStrokeColorSpace()->getMode() == csPattern) {
+	  doPatternStroke();
+	} else {
+	  out->stroke(state);
+	}
       } else {
-	out->eoFill(state);
-      }
-      if (state->getStrokeColorSpace()->getMode() == csPattern) {
-	doPatternStroke();
-      } else {
-	out->stroke(state);
+	out->fillStroke(state, gTrue);
       }
     }
   }
@@ -1892,15 +1910,20 @@ void Gfx::opCloseEOFillStroke(Object args[], int numArgs) {
   if (state->isPath()) {
     state->closePath();
     if (ocState) {
-      if (state->getFillColorSpace()->getMode() == csPattern) {
-	doPatternFill(gTrue);
+      if (state->getFillColorSpace()->getMode() == csPattern ||
+	  state->getStrokeColorSpace()->getMode() == csPattern) {
+	if (state->getFillColorSpace()->getMode() == csPattern) {
+	  doPatternFill(gTrue);
+	} else {
+	  out->eoFill(state);
+	}
+	if (state->getStrokeColorSpace()->getMode() == csPattern) {
+	  doPatternStroke();
+	} else {
+	  out->stroke(state);
+	}
       } else {
-	out->eoFill(state);
-      }
-      if (state->getStrokeColorSpace()->getMode() == csPattern) {
-	doPatternStroke();
-      } else {
-	out->stroke(state);
+	out->fillStroke(state, gTrue);
       }
     }
   }
@@ -1961,7 +1984,7 @@ void Gfx::doPatternStroke() {
   }
 }
 
-void Gfx::doPatternText() {
+void Gfx::doPatternText(GBool stroke) {
   GfxPattern *pattern;
 
   // this is a bit of a kludge -- patterns can be really slow, so we
@@ -1971,7 +1994,8 @@ void Gfx::doPatternText() {
     return;
   }
 
-  if (!(pattern = state->getFillPattern())) {
+  pattern = stroke ? state->getStrokePattern() : state->getFillPattern();
+  if (!pattern) {
     return;
   }
   switch (pattern->getType()) {
@@ -2080,12 +2104,19 @@ void Gfx::doTilingPatternFill(GfxTilingPattern *tPat,
   // Adobe's behavior
   state->setFillPattern(NULL);
   state->setStrokePattern(NULL);
+  state->setFillOverprint(gFalse);
+  state->setStrokeOverprint(gFalse);
+  state->setOverprintMode(0);
   if (tPat->getPaintType() == 2 && (cs = patCS->getUnder())) {
     state->setFillColorSpace(cs->copy());
     out->updateFillColorSpace(state);
     state->setStrokeColorSpace(cs->copy());
     out->updateStrokeColorSpace(state);
-    state->setStrokeColor(state->getFillColor());
+    if (stroke) {
+      state->setFillColor(state->getStrokeColor());
+    } else {
+      state->setStrokeColor(state->getFillColor());
+    }
     out->updateFillColor(state);
     out->updateStrokeColor(state);
     state->setIgnoreColorOps(gTrue);
@@ -2181,16 +2212,30 @@ void Gfx::doTilingPatternFill(GfxTilingPattern *tPat,
   if (bbox[1] > bbox[3]) {
     t = bbox[1]; bbox[1] = bbox[3]; bbox[3] = t;
   }
-  xstep = fabs(tPat->getXStep());
-  ystep = fabs(tPat->getYStep());
-  xi0 = (int)ceil((xMin - bbox[2]) / xstep);
-  xi1 = (int)floor((xMax - bbox[0]) / xstep) + 1;
-  yi0 = (int)ceil((yMin - bbox[3]) / ystep);
-  yi1 = (int)floor((yMax - bbox[1]) / ystep) + 1;
+  xstep = tPat->getXStep();
+  ystep = tPat->getYStep();
+  if (xstep == 0 || ystep == 0) {
+    error(errSyntaxError, getPos(), "Zero x or y step in tiling pattern fill");
+    goto err;
+  }
+  if (xstep > 0) {
+    xi0 = (int)ceil((xMin - bbox[2]) / xstep);
+    xi1 = (int)floor((xMax - bbox[0]) / xstep) + 1;
+  } else {
+    xi0 = (int)ceil((xMax - bbox[0]) / xstep);
+    xi1 = (int)floor((xMin - bbox[2]) / xstep) + 1;
+  }
+  if (ystep > 0) {
+    yi0 = (int)ceil((yMin - bbox[3]) / ystep);
+    yi1 = (int)floor((yMax - bbox[1]) / ystep) + 1;
+  } else {
+    yi0 = (int)ceil((yMax - bbox[1]) / ystep);
+    yi1 = (int)floor((yMin - bbox[3]) / ystep) + 1;
+  }
   for (i = 0; i < 4; ++i) {
     m1[i] = m[i];
   }
-  if (out->useTilingPatternFill()) {
+  if (out->useTilingPatternFill() && !tPat->usesBlendMode(xref)) {
     m1[4] = m[4];
     m1[5] = m[5];
     out->tilingPatternFill(state, this, tPat->getContentStreamRef(),
@@ -3509,12 +3554,16 @@ void Gfx::fillPatch(GfxPatch *patch, GfxPatchMeshShading *shading, int depth) {
 }
 
 void Gfx::doEndPath() {
-  if (state->isCurPt() && clip != clipNone) {
-    state->clip();
-    if (clip == clipNormal) {
-      out->clip(state);
+  if (clip != clipNone) {
+    if (state->isCurPt()) {
+      state->clip();
+      if (clip == clipNormal) {
+	out->clip(state);
+      } else {
+	out->eoClip(state);
+      }
     } else {
-      out->eoClip(state);
+      error(errSyntaxError, getPos(), "Empty path in clip");
     }
   }
   clip = clipNone;
@@ -3543,9 +3592,15 @@ void Gfx::opBeginText(Object args[], int numArgs) {
   out->updateTextMat(state);
   out->updateTextPos(state);
   fontChanged = gTrue;
+  haveSavedClipPath = gFalse;
 }
 
 void Gfx::opEndText(Object args[], int numArgs) {
+  if (haveSavedClipPath) {
+    out->clipToSavedClipPath(state);
+    haveSavedClipPath = gFalse;
+  }
+
   out->endTextObject(state);
 }
 
@@ -3564,8 +3619,10 @@ void Gfx::opSetFont(Object args[], int numArgs) {
 
 void Gfx::doSetFont(GfxFont *font, double size) {
   if (!font) {
-    state->setFont(NULL, 0);
-    return;
+    if (!defaultFont) {
+      defaultFont = GfxFont::makeDefaultFont(xref);
+    }
+    font = defaultFont;
   }
   if (printCommands) {
     printf("  font: tag=%s name='%s' %g\n",
@@ -3772,27 +3829,8 @@ void Gfx::opShowSpaceText(Object args[], int numArgs) {
 }
 
 void Gfx::doShowText(GString *s) {
-  GfxFont *font;
-  int wMode;
-  double riseX, riseY;
-  CharCode code;
-  Unicode u[8];
-  double x, y, dx, dy, dx2, dy2, curX, curY, tdx, tdy, ddx, ddy;
-  double originX, originY, tOriginX, tOriginY;
-  double x0, y0, x1, y1;
-  double oldCTM[6], newCTM[6];
-  double *mat;
-  Object charProcRef, charProc;
-  Dict *resDict;
-  Parser *oldParser;
-  GfxState *savedState;
-  char *p;
-  int render;
-  GBool patternFill;
-  int len, n, uLen, nChars, nSpaces, i;
-
-  font = state->getFont();
-  wMode = font->getWMode();
+  GfxFont *font = state->getFont();
+  int wMode = font->getWMode();
 
   if (globalParams->isDroppedFont(font->getName()
 				    ? font->getName()->getCString() : "")) {
@@ -3804,35 +3842,63 @@ void Gfx::doShowText(GString *s) {
     out->beginString(state, s);
   }
 
-  // if we're doing a pattern fill, set up clipping
-  render = state->getRender();
-  if (!(render & 1) &&
-      state->getFillColorSpace()->getMode() == csPattern) {
-    patternFill = gTrue;
-    saveState();
-    // disable fill, enable clipping, leave stroke unchanged
-    if ((render ^ (render >> 1)) & 1) {
-      render = 5;
+  // figure out the drawing mode
+  // note: clipping, pattern fill, and pattern stroke are all handled
+  //       by saving the path and then performing the appropriate
+  //       actions in opEndText()
+  GBool doFill = gFalse;
+  GBool doStroke = gFalse;
+  GBool doMakePath = gFalse;
+  int render = state->getRender() & 7;
+  switch (render & 7) {
+  case 0:			// fill
+    if (state->getFillColorSpace()->getMode() == csPattern) {
+      doMakePath = gTrue;
     } else {
-      render = 7;
+      doFill = gTrue;
     }
-    state->setRender(render);
-    out->updateRender(state);
-  } else {
-    patternFill = gFalse;
+    break;
+  case 1:			// stroke
+    if (state->getStrokeColorSpace()->getMode() == csPattern) {
+      doMakePath = gTrue;
+    } else {
+      doStroke = gTrue;
+    }
+    break;
+  case 2:			// fill + stroke
+    if (state->getFillColorSpace()->getMode() == csPattern ||
+	state->getStrokeColorSpace()->getMode() == csPattern) {
+      doMakePath = gTrue;
+    } else {
+      doFill = gTrue;
+      doStroke = gTrue;
+    }
+    break;
+  case 3:			// invisible
+    // nothing
+    break;
+  case 4:			// fill + clip
+  case 5:			// stroke + clip
+  case 6:			// fill + stroke + clip
+  case 7:			// clip
+    doMakePath = gTrue;
+    break;
   }
 
+  double riseX, riseY;
   state->textTransformDelta(0, state->getRise(), &riseX, &riseY);
-  x0 = state->getCurX() + riseX;
-  y0 = state->getCurY() + riseY;
+  double xMin = state->getCurX() + riseX;
+  double yMin = state->getCurY() + riseY;
 
   // handle a Type 3 char
   if (font->getType() == fontType3 && out->interpretType3Chars()) {
-    mat = state->getCTM();
-    for (i = 0; i < 6; ++i) {
+    double *mat = state->getCTM();
+    double oldCTM[6];
+    for (int i = 0; i < 6; ++i) {
       oldCTM[i] = mat[i];
     }
     mat = state->getTextMat();
+    double newCTM[6];
     newCTM[0] = mat[0] * oldCTM[0] + mat[1] * oldCTM[2];
     newCTM[1] = mat[0] * oldCTM[1] + mat[1] * oldCTM[3];
     newCTM[2] = mat[2] * oldCTM[0] + mat[3] * oldCTM[2];
@@ -3847,25 +3913,30 @@ void Gfx::doShowText(GString *s) {
     newCTM[2] *= state->getFontSize();
     newCTM[3] *= state->getFontSize();
     newCTM[0] *= state->getHorizScaling();
-    newCTM[2] *= state->getHorizScaling();
-    curX = state->getCurX();
-    curY = state->getCurY();
-    oldParser = parser;
-    p = s->getCString();
-    len = s->getLength();
+    newCTM[1] *= state->getHorizScaling();
+    double curX = state->getCurX();
+    double curY = state->getCurY();
+    Parser *oldParser = parser;
+    char *p = s->getCString();
+    int len = s->getLength();
     while (len > 0) {
-      n = font->getNextChar(p, len, &code,
-			    u, (int)(sizeof(u) / sizeof(Unicode)), &uLen,
-			    &dx, &dy, &originX, &originY);
+      CharCode code;
+      Unicode u[8];
+      int uLen;
+      double dx, dy, originX, originY;
+      int n = font->getNextChar(p, len, &code,
+				u, (int)(sizeof(u) / sizeof(Unicode)), &uLen,
+				&dx, &dy, &originX, &originY);
       dx = dx * state->getFontSize() + state->getCharSpace();
       if (n == 1 && *p == ' ') {
 	dx += state->getWordSpace();
       }
       dx *= state->getHorizScaling();
       dy *= state->getFontSize();
+      double tdx, tdy, ddx, ddy, x, y;
       state->textTransformDelta(dx, dy, &tdx, &tdy);
       state->transform(curX + riseX, curY + riseY, &x, &y);
-      savedState = saveStateStack();
+      GfxState *savedState = saveStateStack();
       state->setCTM(newCTM[0], newCTM[1], newCTM[2], newCTM[3], x, y);
       //~ the CTM concat values here are wrong (but never used)
       out->updateCTM(state, 1, 0, 0, 1, 0, 0);
@@ -3885,9 +3956,11 @@ void Gfx::doShowText(GString *s) {
 #endif
       if (!out->beginType3Char(state, curX + riseX, curY + riseY, ddx, ddy,
 			       code, u, uLen)) {
+	Object charProcRef, charProc;
 	((Gfx8BitFont *)font)->getCharProcNF(code, &charProcRef);
 	charProcRef.fetch(xref, &charProc);
-	if ((resDict = ((Gfx8BitFont *)font)->getResources())) {
+	Dict *resDict = ((Gfx8BitFont *)font)->getResources();
+	if (resDict) {
 	  pushResources(resDict);
 	}
 	if (charProc.isStream()) {
@@ -3913,12 +3986,16 @@ void Gfx::doShowText(GString *s) {
     parser = oldParser;
 
   } else if (out->useDrawChar()) {
-    p = s->getCString();
-    len = s->getLength();
+    char *p = s->getCString();
+    int len = s->getLength();
     while (len > 0) {
-      n = font->getNextChar(p, len, &code,
-			    u, (int)(sizeof(u) / sizeof(Unicode)), &uLen,
-			    &dx, &dy, &originX, &originY);
+      CharCode code;
+      Unicode u[8];
+      int uLen;
+      double dx, dy, originX, originY;
+      int n = font->getNextChar(p, len, &code,
+				u, (int)(sizeof(u) / sizeof(Unicode)), &uLen,
+				&dx, &dy, &originX, &originY);
       if (wMode) {
 	dx *= state->getFontSize();
 	dy = dy * state->getFontSize() + state->getCharSpace();
@@ -3933,26 +4010,32 @@ void Gfx::doShowText(GString *s) {
 	dx *= state->getHorizScaling();
 	dy *= state->getFontSize();
       }
+      double tdx, tdy, tOriginX, tOriginY;
       state->textTransformDelta(dx, dy, &tdx, &tdy);
       originX *= state->getFontSize();
       originY *= state->getFontSize();
       state->textTransformDelta(originX, originY, &tOriginX, &tOriginY);
       out->drawChar(state, state->getCurX() + riseX, state->getCurY() + riseY,
-		    tdx, tdy, tOriginX, tOriginY, code, n, u, uLen);
+		    tdx, tdy, tOriginX, tOriginY, code, n, u, uLen,
+		    doFill, doStroke, doMakePath);
       state->shift(tdx, tdy);
       p += n;
       len -= n;
     }
 
   } else {
-    dx = dy = 0;
-    p = s->getCString();
-    len = s->getLength();
-    nChars = nSpaces = 0;
+    double dx = 0, dy = 0;
+    char *p = s->getCString();
+    int len = s->getLength();
+    int nChars = 0, nSpaces = 0;
     while (len > 0) {
-      n = font->getNextChar(p, len, &code,
-			    u, (int)(sizeof(u) / sizeof(Unicode)), &uLen,
-			    &dx2, &dy2, &originX, &originY);
+      CharCode code;
+      Unicode u[8];
+      int uLen;
+      double dx2, dy2, originX, originY;
+      int n = font->getNextChar(p, len, &code,
+				u, (int)(sizeof(u) / sizeof(Unicode)), &uLen,
+				&dx2, &dy2, &originX, &originY);
       dx += dx2;
       dy += dy2;
       if (n == 1 && *p == ' ') {
@@ -3974,8 +4057,9 @@ void Gfx::doShowText(GString *s) {
       dx *= state->getHorizScaling();
       dy *= state->getFontSize();
     }
+    double tdx, tdy;
     state->textTransformDelta(dx, dy, &tdx, &tdy);
-    out->drawString(state, s);
+    out->drawString(state, s, doFill, doStroke, doMakePath);
     state->shift(tdx, tdy);
   }
 
@@ -3983,40 +4067,70 @@ void Gfx::doShowText(GString *s) {
     out->endString(state);
   }
 
-  if (patternFill) {
-    out->saveTextPos(state);
-    // tell the OutputDev to do the clipping
-    out->endTextObject(state);
-    // set up a clipping bbox so doPatternText will work -- assume
+  if (doMakePath) {
+    // compute the clipping bbox for the saved text path -- assume
     // that the text bounding box does not extend past the baseline in
     // any direction by more than twice the font size
-    x1 = state->getCurX() + riseX;
-    y1 = state->getCurY() + riseY;
-    if (x0 > x1) {
-      x = x0; x0 = x1; x1 = x;
+    double xMax = state->getCurX() + riseX;
+    double yMax = state->getCurY() + riseY;
+    double t;
+    if (xMin > xMax) {
+      t = xMin; xMin = xMax; xMax = t;
     }
-    if (y0 > y1) {
-      y = y0; y0 = y1; y1 = y;
+    if (yMin > yMax) {
+      t = yMin; yMin = yMax; yMax = t;
     }
-    state->textTransformDelta(0, state->getFontSize(), &dx, &dy);
+    double dx1, dy1, dx2, dy2;
+    state->textTransformDelta(0, state->getFontSize(), &dx1, &dy1);
     state->textTransformDelta(state->getFontSize(), 0, &dx2, &dy2);
-    dx = fabs(dx);
+    dx1 = fabs(dx1);
     dx2 = fabs(dx2);
-    if (dx2 > dx) {
-      dx = dx2;
+    if (dx2 > dx1) {
+      dx1 = dx2;
     }
-    dy = fabs(dy);
+    dy1 = fabs(dy1);
     dy2 = fabs(dy2);
-    if (dy2 > dy) {
-      dy = dy2;
+    if (dy2 > dy1) {
+      dy1 = dy2;
     }
-    state->clipToRect(x0 - 2 * dx, y0 - 2 * dy, x1 + 2 * dx, y1 + 2 * dy);
-    // set render mode to fill-only
-    state->setRender(0);
-    out->updateRender(state);
-    doPatternText();
-    restoreState();
-    out->restoreTextPos(state);
+    xMin -= 2 * dx1;
+    yMin -= 2 * dy1;
+    xMax += 2 * dx1;
+    yMax += 2 * dy1;
+
+    //--- fill
+    if ((render & 3) == 0 || (render & 3) == 2) {
+      if (state->getFillColorSpace()->getMode() == csPattern) {
+	saveState();
+	state->clipToRect(xMin, yMin, xMax, yMax);
+	out->clipToTextPath(state);
+	doPatternText(gFalse);
+	restoreState();
+      } else {
+	out->fillTextPath(state);
+      }
+    }
+
+    //--- stroke
+    if ((render & 3) == 1 || (render & 3) == 2) {
+      if (state->getStrokeColorSpace()->getMode() == csPattern) {
+	saveState();
+	state->clipToRect(xMin, yMin, xMax, yMax);
+	out->clipToTextStrokePath(state);
+	doPatternText(gTrue);
+	restoreState();
+      } else {
+	out->strokeTextPath(state);
+      }
+    }
+
+    //--- clip
+    if (render & 4) {
+      out->addTextPathToSavedClipPath(state);
+      haveSavedClipPath = gTrue;
+    } else {
+      out->clearTextPath(state);
+    }
   }
 
   opCounter += 10 * s->getLength();
@@ -4035,7 +4149,7 @@ void Gfx::doIncCharCount(GString *s) {
 
 void Gfx::opXObject(Object args[], int numArgs) {
   char *name;
-  Object obj1, obj2, obj3, refObj;
+  Object xObj, refObj, obj2, obj3;
   GBool ocSaved, oc;
 #if OPI_SUPPORT
   Object opiDict;
@@ -4045,18 +4159,31 @@ void Gfx::opXObject(Object args[], int numArgs) {
     return;
   }
   name = args[0].getName();
-  if (!res->lookupXObject(name, &obj1)) {
+  // NB: we get both the reference and the object here, to make sure
+  // they refer to the same object.  There's a problematic corner
+  // case: if the resource dict contains an entry for [name] with a
+  // reference to a nonexistent object ("/name 99999 0 R", where
+  // object 99999 doesn't exist), and a parent resource dict contains
+  // a valid entry with the same name, then lookupXObjectNF() will
+  // return "99999 0 R", but lookupXObject() will return the valid
+  // entry.  This causes problems for doImage() and doForm().
+  if (!res->lookupXObjectNF(name, &refObj)) {
     return;
   }
-  if (!obj1.isStream()) {
+  if (!refObj.fetch(xref, &xObj)) {
+    refObj.free();
+    return;
+  }
+  if (!xObj.isStream()) {
     error(errSyntaxError, getPos(), "XObject '{0:s}' is wrong type", name);
-    obj1.free();
+    xObj.free();
+    refObj.free();
     return;
   }
 
   // check for optional content key
   ocSaved = ocState;
-  obj1.streamGetDict()->lookupNF("OC", &obj2);
+  xObj.streamGetDict()->lookupNF("OC", &obj2);
   if (doc->getOptionalContent()->evalOCObject(&obj2, &oc)) {
     ocState &= oc;
   }
@@ -4066,33 +4193,30 @@ void Gfx::opXObject(Object args[], int numArgs) {
   try {
 #endif
 #if OPI_SUPPORT
-    obj1.streamGetDict()->lookup("OPI", &opiDict);
+    xObj.streamGetDict()->lookup("OPI", &opiDict);
     if (opiDict.isDict()) {
       out->opiBegin(state, opiDict.getDict());
     }
 #endif
-    obj1.streamGetDict()->lookup("Subtype", &obj2);
+    xObj.streamGetDict()->lookup("Subtype", &obj2);
     if (obj2.isName("Image")) {
       if (out->needNonText()) {
-	res->lookupXObjectNF(name, &refObj);
-	doImage(&refObj, obj1.getStream(), gFalse);
-	refObj.free();
+	doImage(&refObj, xObj.getStream(), gFalse);
       }
     } else if (obj2.isName("Form")) {
-      res->lookupXObjectNF(name, &refObj);
       if (out->useDrawForm() && refObj.isRef()) {
 	if (ocState) {
 	  out->drawForm(refObj.getRef());
 	}
       } else {
-	doForm(&refObj, &obj1);
+	doForm(&refObj, &xObj);
       }
-      refObj.free();
     } else if (obj2.isName("PS")) {
       if (ocState) {
-	obj1.streamGetDict()->lookup("Level1", &obj3);
-	out->psXObject(obj1.getStream(),
+	xObj.streamGetDict()->lookup("Level1", &obj3);
+	out->psXObject(xObj.getStream(),
 		       obj3.isStream() ? obj3.getStream() : (Stream *)NULL);
+	obj3.free();
       }
     } else if (obj2.isName()) {
       error(errSyntaxError, getPos(),
@@ -4110,13 +4234,16 @@ void Gfx::opXObject(Object args[], int numArgs) {
 #endif
 #if USE_EXCEPTIONS
   } catch (GMemException e) {
-    obj1.free();
+    xObj.free();
+    refObj.free();
     throw;
   }
 #endif
-  obj1.free();
 
   ocState = ocSaved;
+
+  xObj.free();
+  refObj.free();
 }
 
 GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
@@ -4144,6 +4271,10 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
     return gTrue;
   }
 
+  // images can have arbitrarily high compression ratios, but the
+  // data size is inherently limited
+  str->disableDecompressionBombChecking();
+
   // get info from the stream
   bits = 0;
   csMode = streamCSNone;
@@ -4161,10 +4292,14 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
     obj1.free();
     dict->lookup("W", &obj1);
   }
-  if (!obj1.isInt()) {
+  if (obj1.isInt()) {
+    width = obj1.getInt();
+  } else if (obj1.isReal()) {
+    error(errSyntaxWarning, getPos(), "Non-integer image width");
+    width = (int)obj1.getReal();
+  } else {
     goto err2;
   }
-  width = obj1.getInt();
   obj1.free();
   if (width <= 0) {
     goto err1;
@@ -4174,10 +4309,14 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
     obj1.free();
     dict->lookup("H", &obj1);
   }
-  if (!obj1.isInt()) {
+  if (obj1.isInt()) {
+    height = obj1.getInt();
+  } else if (obj1.isReal()) {
+    error(errSyntaxWarning, getPos(), "Non-integer image height");
+    height = (int)obj1.getReal();
+  } else {
     goto err2;
   }
-  height = obj1.getInt();
   obj1.free();
   if (height <= 0) {
     goto err1;
@@ -4203,8 +4342,14 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
       obj1.free();
       dict->lookup("BPC", &obj1);
     }
-    if (obj1.isInt()) {
-      bits = obj1.getInt();
+    if (obj1.isNum()) {
+      if (obj1.isInt()) {
+	bits = obj1.getInt();
+      } else if (obj1.isReal()) {
+	error(errSyntaxWarning, getPos(),
+	      "Non-integer image bits per component");
+	bits = (int)obj1.getReal();
+      }
       if (bits < 1 || bits > 16) {
 	goto err2;
       }
@@ -4248,6 +4393,7 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
 
     // if drawing is disabled, skip over inline image data
     if (!ocState) {
+      str->disableDecompressionBombChecking();
       str->reset();
       n = height * ((width + 7) / 8);
       for (i = 0; i < n; ++i) {
@@ -4339,32 +4485,41 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
 	goto err1;
       }
       maskStr = smaskObj.getStream();
+      maskStr->disableDecompressionBombChecking();
       maskDict = smaskObj.streamGetDict();
       maskDict->lookup("Width", &obj1);
       if (obj1.isNull()) {
 	obj1.free();
 	maskDict->lookup("W", &obj1);
       }
-      if (!obj1.isInt()) {
+      if (obj1.isInt()) {
+	maskWidth = obj1.getInt();
+      } else if (obj1.isReal()) {
+	error(errSyntaxWarning, getPos(), "Non-integer image mask width");
+	maskWidth = (int)obj1.getReal();
+      } else {
 	delete colorMap;
 	maskObj.free();
 	smaskObj.free();
 	goto err2;
       }
-      maskWidth = obj1.getInt();
       obj1.free();
       maskDict->lookup("Height", &obj1);
       if (obj1.isNull()) {
 	obj1.free();
 	maskDict->lookup("H", &obj1);
       }
-      if (!obj1.isInt()) {
+      if (obj1.isInt()) {
+	maskHeight = obj1.getInt();
+      } else if (obj1.isReal()) {
+	error(errSyntaxWarning, getPos(), "Non-integer image mask height");
+	maskHeight = (int)obj1.getReal();
+      } else {
 	delete colorMap;
 	maskObj.free();
 	smaskObj.free();
 	goto err2;
       }
-      maskHeight = obj1.getInt();
       obj1.free();
       if (maskWidth <= 0 || maskHeight <= 0) {
 	delete colorMap;
@@ -4377,13 +4532,18 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
 	obj1.free();
 	maskDict->lookup("BPC", &obj1);
       }
-      if (!obj1.isInt()) {
+      if (obj1.isInt()) {
+	maskBits = obj1.getInt();
+      } else if (obj1.isReal()) {
+	error(errSyntaxWarning, getPos(),
+	      "Non-integer image mask bits per component");
+	maskBits = (int)obj1.getReal();
+      } else {
 	delete colorMap;
 	maskObj.free();
 	smaskObj.free();
 	goto err2;
       }
-      maskBits = obj1.getInt();
       obj1.free();
       if (maskBits < 1 || maskBits > 16) {
 	delete colorMap;
@@ -4480,6 +4640,7 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
       }
     } else if (maskObj.isStream()) {
       // explicit mask
+      haveExplicitMask = gTrue;
       if (inlineImg) {
 	delete colorMap;
 	maskObj.free();
@@ -4487,38 +4648,38 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
 	goto err1;
       }
       maskStr = maskObj.getStream();
+      maskStr->disableDecompressionBombChecking();
       maskDict = maskObj.streamGetDict();
       maskDict->lookup("Width", &obj1);
       if (obj1.isNull()) {
 	obj1.free();
 	maskDict->lookup("W", &obj1);
       }
-      if (!obj1.isInt()) {
-	delete colorMap;
-	maskObj.free();
-	smaskObj.free();
-	goto err2;
+      if (obj1.isInt()) {
+	maskWidth = obj1.getInt();
+      } else if (obj1.isReal()) {
+	error(errSyntaxWarning, getPos(), "Non-integer image mask width");
+	maskWidth = (int)obj1.getReal();
+      } else {
+	haveExplicitMask = gFalse;
       }
-      maskWidth = obj1.getInt();
       obj1.free();
       maskDict->lookup("Height", &obj1);
       if (obj1.isNull()) {
 	obj1.free();
 	maskDict->lookup("H", &obj1);
       }
-      if (!obj1.isInt()) {
-	delete colorMap;
-	maskObj.free();
-	smaskObj.free();
-	goto err2;
+      if (obj1.isInt()) {
+	maskHeight = obj1.getInt();
+      } else if (obj1.isReal()) {
+	error(errSyntaxWarning, getPos(), "Non-integer image mask height");
+	maskHeight = (int)obj1.getReal();
+      } else {
+	haveExplicitMask = gFalse;
       }
-      maskHeight = obj1.getInt();
       obj1.free();
       if (maskWidth <= 0 || maskHeight <= 0) {
-	delete colorMap;
-	maskObj.free();
-	smaskObj.free();
-	goto err2;
+	haveExplicitMask = gFalse;
       }
       maskDict->lookup("ImageMask", &obj1);
       if (obj1.isNull()) {
@@ -4526,10 +4687,7 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
 	maskDict->lookup("IM", &obj1);
       }
       if (!obj1.isBool() || !obj1.getBool()) {
-	delete colorMap;
-	maskObj.free();
-	smaskObj.free();
-	goto err2;
+	haveExplicitMask = gFalse;
       }
       obj1.free();
       maskInvert = gFalse;
@@ -4543,13 +4701,12 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
 	maskInvert = obj2.isNum() && obj2.getNum() == 1;
 	obj2.free();
       } else if (!obj1.isNull()) {
-	delete colorMap;
-	maskObj.free();
-	smaskObj.free();
-	goto err2;
+	haveExplicitMask = gFalse;
       }
       obj1.free();
-      haveExplicitMask = gTrue;
+      if (!haveExplicitMask) {
+	error(errSyntaxError, getPos(), "Bad image parameters");
+      }
     }
 
     // if drawing is disabled, skip over inline image data
@@ -4559,6 +4716,7 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
 	      " in uncolored Type 3 char or tiling pattern");
       }
       if (inlineImg) {
+	str->disableDecompressionBombChecking();
 	str->reset();
 	n = height * ((width * colorMap->getNumPixelComps() *
 		       colorMap->getBits() + 7) / 8);
@@ -4569,7 +4727,7 @@ GBool Gfx::doImage(Object *ref, Stream *str, GBool inlineImg) {
     // draw it
     } else {
       if (haveSoftMask) {
-	dict->lookupNF("Mask", &maskRef);
+	dict->lookupNF("SMask", &maskRef);
 	out->drawSoftMaskedImage(state, ref, str, width, height, colorMap,
 				 &maskRef, maskStr, maskWidth, maskHeight,
 				 maskColorMap,
@@ -4654,13 +4812,18 @@ void Gfx::doForm(Object *strRef, Object *str) {
 
   // get bounding box
   dict->lookup("BBox", &bboxObj);
-  if (!bboxObj.isArray()) {
+  if (!(bboxObj.isArray() && bboxObj.arrayGetLength() == 4)) {
     bboxObj.free();
     error(errSyntaxError, getPos(), "Bad form bounding box");
     return;
   }
   for (i = 0; i < 4; ++i) {
     bboxObj.arrayGet(i, &obj1);
+    if (!obj1.isNum()) {
+      bboxObj.free();
+      error(errSyntaxError, getPos(), "Bad form bounding box");
+      return;
+    }
     bbox[i] = obj1.getNum();
     obj1.free();
   }
@@ -4668,10 +4831,14 @@ void Gfx::doForm(Object *strRef, Object *str) {
 
   // get matrix
   dict->lookup("Matrix", &matrixObj);
-  if (matrixObj.isArray()) {
+  if (matrixObj.isArray() && matrixObj.arrayGetLength() == 6) {
     for (i = 0; i < 6; ++i) {
       matrixObj.arrayGet(i, &obj1);
-      m[i] = obj1.getNum();
+      if (obj1.isNum()) {
+	m[i] = obj1.getNum();
+      } else {
+	m[i] = 0;
+      }
       obj1.free();
     }
   } else {
@@ -4725,6 +4892,8 @@ void Gfx::drawForm(Object *strRef, Dict *resDict,
   double oldBaseMatrix[6];
   int i;
 
+  out->startStream(strRef->getRef(), state);
+
   // push new resources on stack
   pushResources(resDict);
 
@@ -4769,22 +4938,27 @@ void Gfx::drawForm(Object *strRef, Dict *resDict,
     groupAttrsObj.free();
     strObj.free();
 
-    traceBegin(oldBaseMatrix, softMask ? "begin soft mask" : "begin t-group");
-    if (state->getBlendMode() != gfxBlendNormal) {
-      state->setBlendMode(gfxBlendNormal);
-      out->updateBlendMode(state);
+    if (!out->beginTransparencyGroup(state, bbox, blendingColorSpace,
+				     isolated, knockout, softMask)) {
+      transpGroup = gFalse;
     }
-    if (state->getFillOpacity() != 1) {
-      state->setFillOpacity(1);
-      out->updateFillOpacity(state);
+
+    if (softMask || transpGroup) {
+      traceBegin(oldBaseMatrix, softMask ? "begin soft mask" : "begin t-group");
+      if (state->getBlendMode() != gfxBlendNormal) {
+	state->setBlendMode(gfxBlendNormal);
+	out->updateBlendMode(state);
+      }
+      if (state->getFillOpacity() != 1) {
+	state->setFillOpacity(1);
+	out->updateFillOpacity(state);
+      }
+      if (state->getStrokeOpacity() != 1) {
+	state->setStrokeOpacity(1);
+	out->updateStrokeOpacity(state);
+      }
+      out->clearSoftMask(state);
     }
-    if (state->getStrokeOpacity() != 1) {
-      state->setStrokeOpacity(1);
-      out->updateStrokeOpacity(state);
-    }
-    out->clearSoftMask(state);
-    out->beginTransparencyGroup(state, bbox, blendingColorSpace,
-				isolated, knockout, softMask);
   }
 
   // set new base matrix
@@ -4849,7 +5023,7 @@ void Gfx::drawForm(Object *strRef, Dict *resDict,
     delete blendingColorSpace;
   }
 
-  return;
+  out->endStream(strRef->getRef());
 }
 
 void Gfx::takeContentStreamStack(Gfx *oldGfx) {
@@ -4888,7 +5062,9 @@ void Gfx::opBeginImage(Object args[], int numArgs) {
     // if we have the stream length, skip to end-of-stream and then
     // skip 'EI' in the original stream
     } else if (haveLength) {
-      while ((c1 = str->getChar()) != EOF) ;
+      // NB: getUndecodedStream() returns the EmbedStream created by
+      // buildImageStream()
+      while ((c1 = str->getUndecodedStream()->getChar()) != EOF) ;
       delete str;
       str = parser->getStream();
       c1 = str->getChar();
@@ -5043,15 +5219,28 @@ void Gfx::opBeginMarkedContent(Object args[], int numArgs) {
     }
     obj.free();
     mcKind = gfxMCOptionalContent;
-  } else if (args[0].isName("Span") && numArgs == 2 && args[1].isDict()) {
-    if (args[1].dictLookup("ActualText", &obj)->isString()) {
-      s = new TextString(obj.getString());
-      out->beginActualText(state, s->getUnicode(), s->getLength());
-      delete s;
-      mcKind = gfxMCActualText;
+  } else if (numArgs == 2 && args[1].isDict()) {
+    if (args[0].isName("Span")) {
+      if (args[1].dictLookup("ActualText", &obj)->isString()) {
+	s = new TextString(obj.getString());
+	out->beginActualText(state, s->getUnicode(), s->getLength());
+	delete s;
+	mcKind = gfxMCActualText;
+      }
+      obj.free();
+    }
+    if (args[1].dictLookup("MCID", &obj)->isInt()) {
+      out->beginStructureItem(args[0].getName(), obj.getInt(),
+			      args[1].getDict());
+      if (mcKind == gfxMCActualText) {
+	mcKind = gfxMCStructureItemAndActualText;
+      } else {
+	mcKind = gfxMCStructureItem;
+      }
     }
     obj.free();
   }
+
   mc = new GfxMarkedContent(mcKind, ocState);
   markedContentStack->append(mc);
 }
@@ -5074,6 +5263,11 @@ void Gfx::opEndMarkedContent(Object args[], int numArgs) {
 	ocState = gTrue;
       }
     } else if (mcKind == gfxMCActualText) {
+      out->endActualText(state);
+    } else if (mcKind == gfxMCStructureItem) {
+      out->endStructureItem();
+    } else if (mcKind == gfxMCStructureItemAndActualText) {
+      out->endStructureItem();
       out->endActualText(state);
     }
   } else {

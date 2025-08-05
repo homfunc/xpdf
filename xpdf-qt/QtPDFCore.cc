@@ -8,10 +8,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma implementation
-#endif
-
 #include <math.h>
 #include <string.h>
 #include <QApplication>
@@ -23,6 +19,7 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QProcess>
+#include <QScreen>
 #include <QScrollBar>
 #include <QStyle>
 #include <QUrl>
@@ -55,8 +52,6 @@ QtPDFCore::QtPDFCore(QWidget *viewportA,
 		     GBool reverseVideo):
   PDFCore(splashModeRGB8, 4, reverseVideo, paperColor)
 {
-  int dpiX, dpiY;
-
   viewport = viewportA;
   hScrollBar = hScrollBarA;
   vScrollBar = vScrollBarA;
@@ -95,23 +90,28 @@ QtPDFCore::QtPDFCore(QWidget *viewportA,
   panEnabled = gTrue;
   showPasswordDialog = gTrue;
 
-  // get Qt's HiDPI scale factor
-#if QT_VERSION >= QT_VERSION_CHECK(5, 6, 0)
-  scaleFactor = viewport->devicePixelRatioF();
-#elif QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-  scaleFactor = viewport->devicePixelRatio();
-#else
-  scaleFactor = 1;
-#endif
-
-  // get the display resolution (used for HiDPI scaling)
-  dpiX = viewport->logicalDpiX();
-  dpiY = viewport->logicalDpiY();
-  displayDpi = dpiX < dpiY ? dpiX : dpiY;
-  displayDpi = (int)(displayDpi * scaleFactor);
+  scaleFactor = computeScaleFactor();
+  displayDpi = computeDisplayDpi();
 }
 
 QtPDFCore::~QtPDFCore() {
+}
+
+double QtPDFCore::computeScaleFactor() {
+  // get Qt's HiDPI scale factor
+  QGuiApplication *app = (QGuiApplication *)QGuiApplication::instance();
+  QScreen *screen = app->primaryScreen();
+#if QT_VERSION >= QT_VERSION_CHECK(5, 6, 0)
+  return screen->devicePixelRatio();
+#else
+  return 1;
+#endif
+}
+
+int QtPDFCore::computeDisplayDpi() {
+  QGuiApplication *app = (QGuiApplication *)QGuiApplication::instance();
+  QScreen *screen = app->primaryScreen();
+  return (int)(screen->logicalDotsPerInch() * computeScaleFactor());
 }
 
 //------------------------------------------------------------------------
@@ -389,6 +389,11 @@ void QtPDFCore::selectWord(int wx, int wy) {
     return;
   }
   PDFCore::selectWord(pg, x, y);
+#ifndef NO_TEXT_SELECT
+  if (hasSelection()) {
+    copySelection(gFalse);
+  }
+#endif
 }
 
 void QtPDFCore::selectLine(int wx, int wy) {
@@ -405,6 +410,11 @@ void QtPDFCore::selectLine(int wx, int wy) {
     return;
   }
   PDFCore::selectLine(pg, x, y);
+#ifndef NO_TEXT_SELECT
+  if (hasSelection()) {
+    copySelection(gFalse);
+  }
+#endif
 }
 
 void QtPDFCore::doLinkCbk(LinkAction *action) {
@@ -623,7 +633,17 @@ GBool QtPDFCore::doAction(LinkAction *action) {
       if (globalParams->getLaunchCommand()) {
 	cmd->insert(0, ' ');
 	cmd->insert(0, globalParams->getLaunchCommand());
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+	QString cmdStr(cmd->getCString());
+	QStringList tokens = QProcess::splitCommand(cmdStr);
+	if (!tokens.isEmpty()) {
+	  QString program = tokens[0];
+	  tokens.removeFirst();
+	  QProcess::startDetached(program, tokens);
+	}
+#else
 	QProcess::startDetached(cmd->getCString());
+#endif
       } else {
 	msg = new GString("About to execute the command:\n");
 	msg->append(cmd);
@@ -632,7 +652,17 @@ GBool QtPDFCore::doAction(LinkAction *action) {
 				  QMessageBox::Ok | QMessageBox::Cancel,
 				  QMessageBox::Ok)
 	    == QMessageBox::Ok) {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+	  QString cmdStr(cmd->getCString());
+	  QStringList tokens = QProcess::splitCommand(cmdStr);
+	  if (!tokens.isEmpty()) {
+	    QString program = tokens[0];
+	    tokens.removeFirst();
+	    QProcess::startDetached(program, tokens);
+	  }
+#else
 	  QProcess::startDetached(cmd->getCString());
+#endif
 	}
 	delete msg;
       }
@@ -822,7 +852,17 @@ void QtPDFCore::runCommand(GString *cmdFmt, GString *arg) {
   } else {
     cmd = cmdFmt->copy();
   }
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+  QString cmdStr(cmd->getCString());
+  QStringList tokens = QProcess::splitCommand(cmdStr);
+  if (!tokens.isEmpty()) {
+    QString program = tokens[0];
+    tokens.removeFirst();
+    QProcess::startDetached(program, tokens);
+  }
+#else
   QProcess::startDetached(cmd->getCString());
+#endif
   delete cmd;
 }
 

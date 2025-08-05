@@ -13,10 +13,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma interface
-#endif
-
 #include "CharTypes.h"
 
 struct UnicodeRemappingString;
@@ -42,6 +38,8 @@ public:
   int map(Unicode in, Unicode *out, int size);
 
 private:
+
+  int findSMap(Unicode u);
 
   Unicode page0[256];
   UnicodeRemappingString *sMap;

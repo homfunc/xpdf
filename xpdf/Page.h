@@ -11,10 +11,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma interface
-#endif
-
 #include "Object.h"
 
 class Dict;
@@ -46,7 +42,7 @@ public:
   // Construct a new PageAttrs object by merging a dictionary
   // (of type Pages or Page) into another PageAttrs object.  If
   // <attrs> is NULL, uses defaults.
-  PageAttrs(PageAttrs *attrs, Dict *dict);
+  PageAttrs(PageAttrs *attrs, Dict *dict, XRef *xref);
 
   // Construct a new PageAttrs object for an empty page (only used
   // when there is an error in the page tree).
@@ -191,6 +187,7 @@ public:
   // Get the page's default CTM.
   void getDefaultCTM(double *ctm, double hDPI, double vDPI,
 		     int rotate, GBool useMediaBox, GBool upsideDown);
+
 
 private:
 

@@ -2740,3 +2740,153 @@ Check for invalid AcroForm ListBox field top index.  [Thanks to
   Chengbin for the bug report.]
 Check for invalid mesh shading parameters.  [Thanks to Chengbin for
   the bug report.]
+
+4.04 (2022-apr-18)
+------------------
+When closing a file, save the current page number in ~/.xpdf.pages,
+  and restore it next time the file is opened.  This can be disabled
+  with "savePageNumbers no" in your xpdfrc file.
+Allow the tab list to be reordered, using drag-and-drop.
+Added a document information dialog, with metadata and fonts, to xpdf.
+Pdftohtml now generates HTML links for URI links anchored on text.
+Added the useTrueTypeUnicodeMapping xpdfrc setting.
+Added the 'enableXFA' xpdfrc setting back: if set to 'no', xpdf will
+  not read an XFA form, meaning all form info comes from the AcroForm.
+Add support for long paths on Windows 10.
+Added the "-formfields" option to pdftohtml.
+Added the "-embedbackground" and "-embedfonts" options to pdftohtml.
+Added the "-vstretch" option to pdftohtml.
+Added the "-verbose" flag to pdfimages, pdftohtml, pdftopng, pdftoppm,
+  pdftops, and pdftotext.
+Added the showAttachmentsPane, showLayersPane, and showOutlinePane
+  commands.
+Added the 'openFile2' command to xpdf.
+Added the showMenuBar, hideMenuBar, and toggleMenuBar commands to
+  xpdf.
+Rearrange file names in the tab list to "foo.pdf [/full/path/]", to
+  improve the usability of the (narrow) tab list.
+Added the 'imageMaskAntialias' xpdfrc setting.
+Added the '-table' switch to pdftohtml.
+Fixed a couple of progression order bugs in the JPEG 2000 decoder.
+  [Thanks to shellway for the bug reports.]
+Fixed a problem with subsampled pixel index computations in the JPEG
+  2000 decoder.  [Thanks to shellway for the bug report.]
+Fixed a couple of memory leaks triggered by fuzzed PDF files.  [Thanks
+  to shellway for the bug report.]
+Changed pdftohtml to generate spans with 'class=' instead of 'id=', so
+  there aren't duplicate ids.  Also removed the unused id in the
+  background img element.
+Optimized SplashOutputDev::drawTilingPattern for the case where the
+  tile is much larger than the area being drawn (i.e., the clipping
+  bbox).  In this case, we can render just the needed portion of the
+  tile.
+Added a missing zero check for precinct size in the JPEG 2000 decoder.
+  [Thanks to shellway for the bug report.]
+Added a missing null check in the XFA form scanner.  [Thanks to Taolaw
+  for the bug report.]
+Deal with xref streams that include a free entry with gen=0xffffffff.
+Fixed a problematic corner case in looking up XObject resources.
+  [Thanks to shellway for the bug report.]
+The unicodeRemapping config command wasn't correctly handling unsorted
+  remapping files.
+Improved handling of RTL text in the text extractor.
+Extended the saveTabState/loadTabState commands to save/restore
+  display mode, zoom, rotation, and scroll position for each tab.
+Added support for Qt6.
+Added a missing bounds check on stream DecodeParms arrays.  [Thanks to
+  minipython for the bug report.]
+Fixed an integer overflow check in XRef::readXRefTable.  [Thanks to
+  yangshufan for the bug report.]
+The builtin Latin1 encoding was mapping 'endash' instead of
+  'softhyphen' to 0xad.  [Thanks to Jach Fong for the bug report.]
+Fixed a bug in PSOutputDev::checkPageSlice() when built without
+  SPLASH_CMYK.  [Thanks to irfanariq for the bug report.]
+Added missing array length and type checks in Gfx::doForm().  [Thanks
+  to shaohua for the bug report.]
+Fixed an integer overflow security hole in the JBIG2 decoder.
+Substitute Helvetica for undefined fonts and bad font objects.
+Added an integer overflow check in JPXStream.  (JPXStream issue)
+  [Thanks to Shin Ando @ Ricera Security for the bug report.]
+The DCT (JPEG) decoder was allowing the 'interleaved' flag to be
+  changed after the first scan of the image.  (CVE-2022-24106) [Thanks
+  to Shin Ando @ Ricera Security for the bug report.]
+
+4.05 (2024-feb-08)
+------------------
+Added the '-overwrite' option to pdftohtml.
+Added the 'ignoreWrongSizeToUnicode' xpdfrc setting.
+Added the loadSession and saveSession commands, and the 'Load last
+  session' menu item.
+Added code to automatically save and restore the xpdf session under
+  control of a session manager.  This has not been thoroughly tested
+  yet.
+Added the zoomScaleFactor xpdfrc setting.
+Added the zoomValues xpdfrc setting.
+Added a 'smart case' option for search in xpdf.
+Added the '-custom' flag to pdfinfo.
+Added a color/gray/mono switch to the 'save image' dialog.
+Added the separateRotatedText xpdfrc setting.
+Added the '-meta' flag to pdftohtml.
+Added the allowLinksToChangeZoom xpdfrc setting.
+Added the 'uses JavaScript' output to pdfinfo.
+Implemented pattern stroking of text.  Also fixed the various
+  combinations of filling/stroking with color/pattern + clipping, some
+  of which weren't being handled correctly.
+Pdftops now (re)compresses any uncompressed or RLE-compressed images.
+On an out-of-memory error, the command line tools now exit with an
+  "out of memory" message, rather than an exception message.
+Add code to pdfimages to extract images from tiling patterns.
+Pdftops can now embed external 8-bit OpenType CFF fonts.
+Fixed a corner case in the text extractor related to characters drawn
+  at extremely large coordinates.  [Thanks to elvadisas for the bug
+  report.]
+Fixed an integer overflow in the transparency group code.  [Thanks to
+  elvadisas for the bug report.]
+Modify Annots::Annots() to skip annotations that have been turned into
+  AcroFormFields -- invalid Widget-type annots will now be rendered as
+  annots.
+Added a missing integer overflow check in the JBIG2 decoder.  [Thanks
+  to sangjun for the bug report.]
+Added some sanity checks to the JBIG2 decoder.  [Thanks to sangjun and
+  ycdxsb for the bug reports.]
+Tiling patterns that use non-Normal blend modes can't be cached.
+Fixed a bitmap size sanity check in the JBIG2 decoder.  [Thanks to Han
+  Zheng (NCNIPC of China, Hexhive), for the bug report.]
+Fixed a missing bounds check in FoFiType1C::convertToOpenType (used in
+  pdftohtml).  [Thanks to cyth for the bug report.]
+Fixed a use-after-free bug in pdftohtml.  [Thanks to FeRDNYC for the
+  bug report.]
+Merged aconf2.h into aconf.h; corrected the cmake config settings for
+  paths; added the BASE14_FONT_DIR config option.  [Thanks to FeRDNYC
+  for the suggestions.]
+Fixed a missing check for a zero-length index in the CFF (Type1C) font
+  parser.  [Thanks to Yuhang Huang (NCNIPC of China), Han Zheng
+  (NCNIPC of China, Hexhive), Wanying Cao, Jiayu Zhao (NCNIPC of
+  China) for the bug report.]
+Add an object loop check to Catalog::countPageTree().
+The DCT decoder wasn't checking for an SOF before the first SOS.
+  [Thanks to cyth for the bug report.]
+The inline image decoder was skipping to end-of-stream in the wrong
+  stream object.  [Thanks to cyth for the bug report.]
+Fixed a bug in the JPEG 2000 decoder when nLayers > 1 and the
+  'termination on each coding pass' flag is set.
+Removed the #pragma interface/implementation stuff (which is outdated
+  and useless at this point).
+Fixed a bug in the ICCBased color space parser that was allowing the
+  number of components to be zero.  (CVE-2023-2662)  [Thanks to
+  huckleberry for the bug report.]
+Added checks for PDF object loops in AcroForm::scanField()
+  (CVE-2018-7453, CVE-2018-16369, CVE-2022-36561, CVE-2022-41844),
+  Catalog::readPageLabelTree2() (CVE-2023-2663), and
+  Catalog::readEmbeddedFileTree() (CVE-2023-2664).
+The zero-width character problem can also happen if the page size is
+  very large -- that needs to be limited too, the same way as
+  character position coordinates.  (CVE-2023-3044) [Thanks to jlinliu
+  for the bug report.]
+Add some missing bounds check code in DCTStream.  [Thanks to Jiahao
+  Liu for the bug report.]
+Fix a deadlock when an object stream's length field is contained in
+  another object stream.  (CVE-2023-3436) [Thanks to Jiahao Liu for
+  the bug report.]
+Correctly handle tiling patterns with negative step values.
+Ignore overprint in soft masks (to match Adobe's behavior).

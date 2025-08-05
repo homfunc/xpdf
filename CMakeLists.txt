@@ -4,7 +4,7 @@
 #
 # CMake script for the Xpdf package.
 #
-# Copyright 2015 Glyph & Cog, LLC
+# Copyright 2021 Glyph & Cog, LLC
 #
 #========================================================================
 
@@ -34,8 +34,8 @@ endif ()
 #  message(WARNING "Couldn't find libpng -- will not build pdftopng or pdftohtml.")
 #endif ()
 
-#if (NOT QT4_FOUND AND NOT Qt5Widgets_FOUND)
-#  message(WARNING "Couldn't find Qt4 or Qt5 -- will not build xpdf.")
+#if (NOT QT4_FOUND AND NOT Qt5Widgets_FOUND AND NOT Qt6Widgets_FOUND)
+#  message(WARNING "Couldn't find Qt4/5/6 -- will not build xpdf.")
 #endif ()
 
 if (NOT MULTITHREADED)

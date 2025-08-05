@@ -11,11 +11,11 @@
 #include <math.h>
 #include <QAbstractItemModel>
 #include <QAction>
+#include <QActionGroup>
 #include <QButtonGroup>
 #include <QClipboard>
 #include <QComboBox>
 #include <QDesktopServices>
-#include <QDesktopWidget>
 #include <QFileDialog>
 #include <QFrame>
 #include <QGridLayout>
@@ -36,11 +36,13 @@
 #include <QPropertyAnimation>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QScreen>
 #include <QScrollBar>
 #include <QSignalMapper>
 #include <QSplitter>
 #include <QStackedLayout>
 #include <QStackedWidget>
+#include <QTabWidget>
 #include <QTableWidget>
 #include <QTextBrowser>
 #include <QTimer>
@@ -52,7 +54,10 @@
 #include "GlobalParams.h"
 #include "QtPDFCore.h"
 #include "PDFDoc.h"
+#include "AcroForm.h"
+#include "Annot.h"
 #include "TextString.h"
+#include "Zoox.h"
 #include "XpdfApp.h"
 #include "XpdfViewer.h"
 #include "gmempp.h"
@@ -78,18 +83,13 @@ static const char *aboutHTML =
   "<br>"
   "XpdfReader uses the following open source libraries:"
   "<ul>"
-  "FreeType is copyright 2006-2020 David Turner, Robert Wilhelm, and Werner Lemberg.  FreeType is used here under the terms of the FreeType Project License."
+  "<li>FreeType is copyright 2006-2023 David Turner, Robert Wilhelm, and Werner Lemberg.  FreeType is used here under the terms of the FreeType Project License."
   "<li>The Qt Toolkit is Copyright 2015 The Qt Company Ltd.  Qt is used here under the terms of the LGPL v2.1."
   "</ul>";
 
 const char *helpURL = "http://www.xpdfreader.com/help";
 
 //------------------------------------------------------------------------
-
-#define nZoomComboBoxVals 13
-static int zoomComboBoxVals[nZoomComboBoxVals] = {
-  25, 50, 75, 100, 110, 125, 150, 175, 200, 300, 400, 600, 800
-};
 
 #define maxZoom 2000
 
@@ -146,18 +146,21 @@ XpdfViewerCmd XpdfViewer::cmdTab[] = {
   { "gotoPage",                1, gTrue,  gFalse, &XpdfViewer::cmdGotoPage },
 //~   { "gotoPageNoScroll",        1, gTrue,  gFalse, &XpdfViewer::cmdGotoPageNoScroll },
   { "help",                    0, gFalse, gFalse, &XpdfViewer::cmdHelp },
+  { "hideMenuBar",             0, gFalse, gFalse, &XpdfViewer::cmdHideMenuBar },
   { "hideToolbar",             0, gFalse, gFalse, &XpdfViewer::cmdHideToolbar },
   { "horizontalContinuousMode",0, gFalse, gFalse, &XpdfViewer::cmdHorizontalContinuousMode },
   { "linearSelectMode",        0, gFalse, gFalse, &XpdfViewer::cmdLinearSelectMode },
+  { "loadSession",             0, gFalse, gFalse, &XpdfViewer::cmdLoadSession },
   { "loadTabState",            0, gFalse, gFalse, &XpdfViewer::cmdLoadTabState },
   { "newTab",                  0, gFalse, gFalse, &XpdfViewer::cmdNewTab },
   { "newWindow",               0, gFalse, gFalse, &XpdfViewer::cmdNewWindow },
   { "nextPage",                0, gTrue,  gFalse, &XpdfViewer::cmdNextPage },
   { "nextPageNoScroll",        0, gTrue,  gFalse, &XpdfViewer::cmdNextPageNoScroll },
-  { "nextTab",                 0, gTrue,  gFalse, &XpdfViewer::cmdNextTab },
+  { "nextTab",                 0, gFalse, gFalse, &XpdfViewer::cmdNextTab },
   { "open",                    0, gFalse, gFalse, &XpdfViewer::cmdOpen },
   { "openErrorWindow",         0, gFalse, gFalse, &XpdfViewer::cmdOpenErrorWindow },
   { "openFile",                1, gFalse, gFalse, &XpdfViewer::cmdOpenFile },
+  { "openFile2",               5, gFalse, gFalse, &XpdfViewer::cmdOpenFile2 },
   { "openFileAtDest",          2, gFalse, gFalse, &XpdfViewer::cmdOpenFileAtDest },
   { "openFileAtDestIn",        3, gFalse, gFalse, &XpdfViewer::cmdOpenFileAtDestIn },
   { "openFileAtPage",          2, gFalse, gFalse, &XpdfViewer::cmdOpenFileAtPage },
@@ -172,7 +175,7 @@ XpdfViewerCmd XpdfViewer::cmdTab[] = {
   { "postPopupMenu",           0, gFalse, gTrue,  &XpdfViewer::cmdPostPopupMenu },
   { "prevPage",                0, gTrue,  gFalse, &XpdfViewer::cmdPrevPage },
   { "prevPageNoScroll",        0, gTrue,  gFalse, &XpdfViewer::cmdPrevPageNoScroll },
-  { "prevTab",                 0, gTrue,  gFalse, &XpdfViewer::cmdPrevTab },
+  { "prevTab",                 0, gFalse, gFalse, &XpdfViewer::cmdPrevTab },
 #if XPDFWIDGET_PRINTING
   { "print",                   0, gTrue,  gFalse, &XpdfViewer::cmdPrint },
 #endif
@@ -185,6 +188,7 @@ XpdfViewerCmd XpdfViewer::cmdTab[] = {
   { "run",                     1, gFalse, gFalse, &XpdfViewer::cmdRun },
   { "saveAs",                  0, gTrue,  gFalse, &XpdfViewer::cmdSaveAs },
   { "saveImage",               0, gTrue,  gFalse, &XpdfViewer::cmdSaveImage },
+  { "saveSession",             0, gFalse, gFalse, &XpdfViewer::cmdSaveSession },
   { "saveTabState",            0, gFalse, gFalse, &XpdfViewer::cmdSaveTabState },
   { "scrollDown",              1, gTrue,  gFalse, &XpdfViewer::cmdScrollDown },
   { "scrollDownNextPage",      1, gTrue,  gFalse, &XpdfViewer::cmdScrollDownNextPage },
@@ -203,7 +207,12 @@ XpdfViewerCmd XpdfViewer::cmdTab[] = {
   { "selectLine",              0, gTrue,  gTrue,  &XpdfViewer::cmdSelectLine },
   { "selectWord",              0, gTrue,  gTrue,  &XpdfViewer::cmdSelectWord },
   { "setSelection",            5, gTrue,  gFalse, &XpdfViewer::cmdSetSelection },
+  { "showAttachmentsPane",     0, gFalse, gFalse, &XpdfViewer::cmdShowAttachmentsPane },
+  { "showDocumentInfo",        0, gTrue,  gFalse, &XpdfViewer::cmdShowDocumentInfo },
   { "showKeyBindings",         0, gFalse, gFalse, &XpdfViewer::cmdShowKeyBindings },
+  { "showLayersPane",          0, gFalse, gFalse, &XpdfViewer::cmdShowLayersPane },
+  { "showMenuBar",             0, gFalse, gFalse, &XpdfViewer::cmdShowMenuBar },
+  { "showOutlinePane",         0, gFalse, gFalse, &XpdfViewer::cmdShowOutlinePane },
   { "showToolbar",             0, gFalse, gFalse, &XpdfViewer::cmdShowToolbar },
   { "shrinkSidebar",           1, gFalse, gFalse, &XpdfViewer::cmdShrinkSidebar },
   { "sideBySideContinuousMode",0, gFalse, gFalse, &XpdfViewer::cmdSideBySideContinuousMode },
@@ -214,11 +223,12 @@ XpdfViewerCmd XpdfViewer::cmdTab[] = {
   { "startSelection",          0, gTrue,  gTrue,  &XpdfViewer::cmdStartSelection },
   { "toggleContinuousMode",    0, gFalse, gFalse, &XpdfViewer::cmdToggleContinuousMode },
   { "toggleFullScreenMode",    0, gFalse, gFalse, &XpdfViewer::cmdToggleFullScreenMode },
+  { "toggleMenuBar",           0, gFalse, gFalse, &XpdfViewer::cmdToggleMenuBar },
   { "toggleSelectMode",        0, gFalse, gFalse, &XpdfViewer::cmdToggleSelectMode },
   { "toggleSidebar",           0, gFalse, gFalse, &XpdfViewer::cmdToggleSidebar },
   { "toggleSidebarMoveResizeWin",  0, gFalse, gFalse, &XpdfViewer::cmdToggleSidebarMoveResizeWin },
   { "toggleSidebarResizeWin",  0, gFalse, gFalse, &XpdfViewer::cmdToggleSidebarResizeWin },
-  { "toggleToolbar",           0, gFalse, gFalse, &XpdfViewer::cmdShowToolbar },
+  { "toggleToolbar",           0, gFalse, gFalse, &XpdfViewer::cmdToggleToolbar },
   { "viewPageLabels",          0, gFalse, gFalse, &XpdfViewer::cmdViewPageLabels },
   { "viewPageNumbers",         0, gFalse, gFalse, &XpdfViewer::cmdViewPageNumbers },
   { "windowMode",              0, gFalse, gFalse, &XpdfViewer::cmdWindowMode },
@@ -286,8 +296,13 @@ XpdfErrorWindow::XpdfErrorWindow(XpdfViewer *viewerA, int errorEventTypeA) {
 
   setLayout(topLayout);
 
+#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
+  lastSize = QSize(list->fontMetrics().horizontalAdvance("m") * 50,
+		   list->fontMetrics().lineSpacing() * 16);
+#else
   lastSize = QSize(list->fontMetrics().width("m") * 50,
 		   list->fontMetrics().lineSpacing() * 16);
+#endif
 
   setErrorCallback(&errorCbk, this);
 }
@@ -373,7 +388,7 @@ QValidator::State ZoomValidator::validate(QString &input, int &pos) const {
   QChar c;
   int n, i;
 
-  n = input.length();
+  n = (int)input.length();
   if (n == 0) {
     return QValidator::Intermediate;
   }
@@ -429,11 +444,11 @@ QVariant PropertyListAnimation::interpolated(const QVariant &from,
 					     qreal progress) const {
   int i;
 
-  i = (int)(progress * valueList.size());
+  i = (int)(progress * (int)valueList.size());
   if (i < 0) {
     i = 0;
   } else if (i >= valueList.size()) {
-    i = valueList.size() - 1;
+    i = (int)valueList.size() - 1;
   }
   return valueList[i];
 }
@@ -743,7 +758,7 @@ bool LayerModel::setData(const QModelIndex &idx, const QVariant &value,
 
 Qt::ItemFlags LayerModel::flags(const QModelIndex &idx) const {
   if (!idx.isValid()) {
-    return 0;
+    return Qt::NoItemFlags;
   }
   // NB: this does not include Qt::ItemIsUserCheckable because we use
   // the QTreeView::clicked signal to toggle the checkbox -- which
@@ -868,7 +883,7 @@ void XpdfViewer::tweakSize() {
   }
 
   QSize hint = sizeHint();
-  QRect screen = QApplication::desktop()->availableGeometry();
+  QRect screen = QGuiApplication::primaryScreen()->availableGeometry();
   int w = hint.width();
   int h = hint.height();
   if (w > screen.width() - 60) {
@@ -880,12 +895,30 @@ void XpdfViewer::tweakSize() {
   resize(w, h);
 }
 
+bool XpdfViewer::close() {
+  if (tabInfo->getLength() > 0) {
+    app->startUpdatePagesFile();
+    for (int i = 0; i < tabInfo->getLength(); ++i) {
+      XpdfTabInfo *tab = (XpdfTabInfo *)tabInfo->get(i);
+      app->updatePagesFile(tab->pdf->getFileName(), tab->pdf->getMidPage());
+    }
+    app->finishUpdatePagesFile();
+  }
+  return QMainWindow::close();
+}
+
 //------------------------------------------------------------------------
 
 GBool XpdfViewer::open(QString fileName, int page, QString destName,
 		       int rot, QString password) {
   XpdfWidget::ErrorCode err;
 
+  if (currentTab->pdf->hasOpenDocument()) {
+    app->startUpdatePagesFile();
+    app->updatePagesFile(currentTab->pdf->getFileName(),
+			 currentTab->pdf->getMidPage());
+    app->finishUpdatePagesFile();
+  }
   err = currentTab->pdf->loadFile(fileName, password);
   if (err != XpdfWidget::pdfOk) {
     QMessageBox::warning(NULL, "Xpdf Error",
@@ -895,6 +928,9 @@ GBool XpdfViewer::open(QString fileName, int page, QString destName,
   if (!destName.isEmpty()) {
     currentTab->pdf->gotoNamedDestination(destName);
   } else {
+    if (page < 0) {
+      page = app->getSavedPageNumber(fileName);
+    }
     currentTab->pdf->gotoPage(page);
   }
   if (rot != 0) {
@@ -902,6 +938,7 @@ GBool XpdfViewer::open(QString fileName, int page, QString destName,
   }
   // after opening a document, focus goes to the XpdfWidget
   currentTab->pdf->setFocus(Qt::OtherFocusReason);
+  lastOpenedTab = currentTab;
   lastFileOpened = fileName;
   return gTrue;
 }
@@ -921,6 +958,7 @@ GBool XpdfViewer::openInNewTab(QString fileName, int page, QString destName,
     }
     return gFalse;
   }
+  lastOpenedTab = currentTab;
   if (!switchToTab) {
     tabList->setCurrentRow(oldTabIndex);
   }
@@ -933,6 +971,12 @@ GBool XpdfViewer::checkOpen(QString fileName, int page, QString destName,
   XpdfWidget::ErrorCode err;
 
   if (fileName != currentTab->pdf->getFileName()) {
+    if (currentTab->pdf->hasOpenDocument()) {
+      app->startUpdatePagesFile();
+      app->updatePagesFile(currentTab->pdf->getFileName(),
+			   currentTab->pdf->getMidPage());
+      app->finishUpdatePagesFile();
+    }
     err = currentTab->pdf->loadFile(fileName, password);
     if (err != XpdfWidget::pdfOk) {
       QMessageBox::warning(NULL, "Xpdf Error",
@@ -943,11 +987,15 @@ GBool XpdfViewer::checkOpen(QString fileName, int page, QString destName,
   if (!destName.isEmpty()) {
     currentTab->pdf->gotoNamedDestination(destName);
   } else {
+    if (page < 0) {
+      page = app->getSavedPageNumber(fileName);
+    }
     currentTab->pdf->gotoPage(page);
   }
   // after opening a document, focus goes to the XpdfWidget
   currentTab->pdf->setFocus(Qt::OtherFocusReason);
   lastFileOpened = fileName;
+  lastOpenedTab = currentTab;
   return gTrue;
 }
 
@@ -955,6 +1003,110 @@ GBool XpdfViewer::checkOpen(QString fileName, int page, QString destName,
 // toolbar).
 QMenu *XpdfViewer::createPopupMenu() {
   return NULL;
+}
+
+void XpdfViewer::saveSession(FILE *out, int format) {
+  fprintf(out, "%d\n", tabInfo->getLength());
+  for (int i = 0; i < tabInfo->getLength(); ++i) {
+    XpdfWidget *pdf = ((XpdfTabInfo *)tabInfo->get(i))->pdf;
+    QString fileName = pdf->getFileName();
+    if (!fileName.isEmpty()) {
+      fprintf(out, "%s\n", fileName.toUtf8().constData());
+      char displayModeChar;
+      switch (pdf->getDisplayMode()) {
+      case XpdfWidget::pdfDisplaySingle:
+	displayModeChar = 's';
+	break;
+      case XpdfWidget::pdfDisplayContinuous:
+	displayModeChar = 'c';
+	break;
+      case XpdfWidget::pdfDisplaySideBySideSingle:
+	displayModeChar = 'b';
+	break;
+      case XpdfWidget::pdfDisplaySideBySideContinuous:
+	displayModeChar = 'B';
+	break;
+      case XpdfWidget::pdfDisplayHorizontalContinuous:
+	displayModeChar = 'h';
+	break;
+      default:
+	displayModeChar = 'c';
+	break;
+      }
+      fprintf(out, "%c %d %g %d %d %d\n",
+	      displayModeChar, pdf->getMidPage(), pdf->getZoom(),
+	      pdf->getRotate(), pdf->getScrollX(), pdf->getScrollY());
+    }
+  }
+}
+
+void XpdfViewer::loadSession(FILE *in, int format) {
+  char line1[1024], line2[1024];
+  if (!fgets(line1, sizeof(line1), in)) {
+    return;
+  }
+  int nTabs;
+  if (sscanf(line1, "%d", &nTabs) != 1) {
+    return;
+  }
+
+  GBool first = gTrue;
+  for (int i = 0; i < nTabs; ++i) {
+    if (!fgets(line1, sizeof(line1), in) || !fgets(line2, sizeof(line2), in)) {
+      return;
+    }
+    size_t n = strlen(line1);
+    if (n > 0 && line1[n-1] == '\n') {
+      line1[--n] = '\0';
+    }
+    if (n > 0 && line1[n-1] == '\r') {
+      line1[--n] = '\0';
+    }
+    char displayModeChar;
+    int page, rotate, scrollX, scrollY;
+    double zoom;
+    if (sscanf(line2, "%c %d %lf %d %d %d",
+	       &displayModeChar, &page, &zoom, &rotate,
+	       &scrollX, &scrollY) != 6) {
+      return;
+    }
+    GBool ok;
+    if (first && !currentTab->pdf->hasOpenDocument()) {
+      ok = open(line1, page, "", rotate, "");
+    } else {
+      ok = openInNewTab(line1, page, "", rotate, "", gFalse);
+    }
+    if (ok) {
+      XpdfWidget *pdf = lastOpenedTab->pdf;
+      switch (displayModeChar) {
+      case 's':
+	pdf->setDisplayMode(XpdfWidget::pdfDisplaySingle);
+	break;
+      case 'c':
+	pdf->setDisplayMode(XpdfWidget::pdfDisplayContinuous);
+	break;
+      case 'b':
+	pdf->setDisplayMode(XpdfWidget::pdfDisplaySideBySideSingle);
+	break;
+      case 'B':
+	pdf->setDisplayMode(XpdfWidget::pdfDisplaySideBySideContinuous);
+	break;
+      case 'h':
+	pdf->setDisplayMode(XpdfWidget::pdfDisplayHorizontalContinuous);
+	break;
+      default: break;
+      }
+      pdf->setRotate(rotate);
+      pdf->setZoom(zoom);
+      pdf->scrollTo(scrollX, scrollY);
+    }
+    first = gFalse;
+  }
+}
+
+GBool XpdfViewer::isEmpty() {
+  return tabInfo->getLength() == 1 &&
+         ((XpdfTabInfo *)tabInfo->get(0))->pdf->getFileName().isEmpty();
 }
 
 //------------------------------------------------------------------------
@@ -1044,6 +1196,7 @@ void XpdfViewer::execCmd(const char *cmd, QInputEvent *event) {
   //----- find the command
   a = -1;
   b = nCmds;
+  cmp = 0;
   // invariant: cmdTab[a].name < name < cmdTab[b].name
   while (b - a > 1) {
     m = (a + b) / 2;
@@ -1105,9 +1258,13 @@ int XpdfViewer::mouseX(QInputEvent *event) {
       eventType == QEvent::MouseButtonRelease ||
       eventType == QEvent::MouseButtonDblClick ||
       eventType == QEvent::MouseMove) {
-    return (int)(((QMouseEvent *)event)->x() * scaleFactor);
+    return (int)(((QMouseEvent *)event)->pos().x() * scaleFactor);
   } else if (eventType == QEvent::Wheel) {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+    return (int)(((QWheelEvent *)event)->position().x() * scaleFactor);
+#else
     return (int)(((QWheelEvent *)event)->x() * scaleFactor);
+#endif
   } else {
     return 0;
   }
@@ -1124,9 +1281,13 @@ int XpdfViewer::mouseY(QInputEvent *event) {
       eventType == QEvent::MouseButtonRelease ||
       eventType == QEvent::MouseButtonDblClick ||
       eventType == QEvent::MouseMove) {
-    return (int)(((QMouseEvent *)event)->y() * scaleFactor);
+    return (int)(((QMouseEvent *)event)->pos().y() * scaleFactor);
   } else if (eventType == QEvent::Wheel) {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+    return (int)(((QWheelEvent *)event)->position().y() * scaleFactor);
+#else
     return (int)(((QWheelEvent *)event)->y() * scaleFactor);
+#endif
   } else {
     return 0;
   }
@@ -1148,7 +1309,7 @@ void XpdfViewer::cmdBlockSelectMode(GString *args[], int nArgs,
 
 void XpdfViewer::cmdCheckOpenFile(GString *args[], int nArgs,
 				  QInputEvent *event) {
-  checkOpen(args[0]->getCString(), 1, "", "");
+  checkOpen(args[0]->getCString(), -1, "", "");
 }
 
 void XpdfViewer::cmdCheckOpenFileAtDest(GString *args[], int nArgs,
@@ -1277,10 +1438,7 @@ void XpdfViewer::cmdFindFirst(GString *args[], int nArgs, QInputEvent *event) {
   int flags;
 
   clearFindError();
-  flags = 0;
-  if (findCaseSensitiveAction->isChecked()) {
-    flags |= XpdfWidget::findCaseSensitive;
-  }
+  flags = getFindCaseFlag();
   if (findWholeWordsAction->isChecked()) {
     flags |= XpdfWidget::findWholeWord;
   }
@@ -1293,10 +1451,7 @@ void XpdfViewer::cmdFindNext(GString *args[], int nArgs, QInputEvent *event) {
   int flags;
 
   clearFindError();
-  flags = XpdfWidget::findNext;
-  if (findCaseSensitiveAction->isChecked()) {
-    flags |= XpdfWidget::findCaseSensitive;
-  }
+  flags = XpdfWidget::findNext | getFindCaseFlag();
   if (findWholeWordsAction->isChecked()) {
     flags |= XpdfWidget::findWholeWord;
   }
@@ -1310,10 +1465,7 @@ void XpdfViewer::cmdFindPrevious(GString *args[], int nArgs,
   int flags;
 
   clearFindError();
-  flags = XpdfWidget::findBackward | XpdfWidget::findNext;
-  if (findCaseSensitiveAction->isChecked()) {
-    flags |= XpdfWidget::findCaseSensitive;
-  }
+  flags = XpdfWidget::findBackward | XpdfWidget::findNext | getFindCaseFlag();
   if (findWholeWordsAction->isChecked()) {
     flags |= XpdfWidget::findWholeWord;
   }
@@ -1402,6 +1554,11 @@ void XpdfViewer::cmdHelp(GString *args[], int nArgs, QInputEvent *event) {
   QDesktopServices::openUrl(QUrl(helpURL, QUrl::TolerantMode));
 }
 
+void XpdfViewer::cmdHideMenuBar(GString *args[], int nArgs,
+				QInputEvent *event) {
+  mainMenu->hide();
+}
+
 void XpdfViewer::cmdHideToolbar(GString *args[], int nArgs,
 				QInputEvent *event) {
   toolBar->hide();
@@ -1419,17 +1576,17 @@ void XpdfViewer::cmdLinearSelectMode(GString *args[], int nArgs,
   updateSelectModeInfo();
 }
 
+void XpdfViewer::cmdLoadSession(GString *args[], int nArgs,
+				QInputEvent *event) {
+  app->loadSession(NULL, gTrue);
+}
+
 void XpdfViewer::cmdLoadTabState(GString *args[], int nArgs,
 				 QInputEvent *event) {
-  FILE *f;
-  GString *path, *msg;
-  char line1[1024], line2[100];
-  GBool first;
-  int n;
-
-  path = globalParams->getTabStateFile();
-  if (!(f = openFile(path->getCString(), "rb"))) {
-    msg = GString::format("Couldn't read the tab file '{0:t}'", path);
+  GString *path = globalParams->getTabStateFile();
+  FILE *f = openFile(path->getCString(), "rb");
+  if (!f) {
+    GString *msg = GString::format("Couldn't read the tab file '{0:t}'", path);
     QMessageBox::warning(NULL, "Xpdf Error", msg->getCString());
     delete msg;
     delete path;
@@ -1437,27 +1594,83 @@ void XpdfViewer::cmdLoadTabState(GString *args[], int nArgs,
   }
   delete path;
 
-  first = gTrue;
-  while (fgets(line1, sizeof(line1), f) &&
+  char line1[1024], line2[1024];
+  if (!fgets(line1, sizeof(line1), f)) {
+    fclose(f);
+    return;
+  }
+  size_t n = strlen(line1);
+  if (n > 0 && line1[n-1] == '\n') {
+    line1[--n] = '\0';
+  }
+  if (n > 0 && line1[n-1] == '\r') {
+    line1[--n] = '\0';
+  }
+  int format = 1;
+  if (!strcmp(line1, "xpdf-tabstate-2")) {
+    format = 2;
+  }
+
+  GBool first = gTrue;
+  while (((first && format == 1) || fgets(line1, sizeof(line1), f)) &&
 	 fgets(line2, sizeof(line2), f)) {
-    n = (int)strlen(line1);
+    n = strlen(line1);
     if (n > 0 && line1[n-1] == '\n') {
       line1[--n] = '\0';
     }
     if (n > 0 && line1[n-1] == '\r') {
       line1[--n] = '\0';
     }
-    n = (int)strlen(line2);
+    n = strlen(line2);
     if (n > 0 && line2[n-1] == '\n') {
       line2[--n] = '\0';
     }
     if (n > 0 && line2[n-1] == '\r') {
       line2[--n] = '\0';
     }
-    if (first && !currentTab->pdf->hasOpenDocument()) {
-      open(line1, atoi(line2), "", 0, "");
+    char displayModeChar;
+    int page, rotate, scrollX, scrollY;
+    double zoom;
+    if (format == 2) {
+      sscanf(line2, "%c %d %lf %d %d %d",
+	     &displayModeChar, &page, &zoom, &rotate, &scrollX, &scrollY);
     } else {
-      openInNewTab(line1, atoi(line2), "", 0, "", gFalse);
+      page = atoi(line2);
+      rotate = 0;
+      // the rest are unused, but set to make gcc happy
+      displayModeChar = 'c';
+      zoom = zoomWidth;
+      scrollX = scrollY = 0;
+    }
+    GBool ok;
+    if (first && !currentTab->pdf->hasOpenDocument()) {
+      ok = open(line1, page, "", rotate, "");
+    } else {
+      ok = openInNewTab(line1, page, "", rotate, "", gFalse);
+    }
+    if (ok && format == 2) {
+      XpdfWidget *pdf = lastOpenedTab->pdf;
+      switch (displayModeChar) {
+      case 's':
+	pdf->setDisplayMode(XpdfWidget::pdfDisplaySingle);
+	break;
+      case 'c':
+	pdf->setDisplayMode(XpdfWidget::pdfDisplayContinuous);
+	break;
+      case 'b':
+	pdf->setDisplayMode(XpdfWidget::pdfDisplaySideBySideSingle);
+	break;
+      case 'B':
+	pdf->setDisplayMode(XpdfWidget::pdfDisplaySideBySideContinuous);
+	break;
+      case 'h':
+	pdf->setDisplayMode(XpdfWidget::pdfDisplayHorizontalContinuous);
+	break;
+      default: break;
+      }
+      pdf->setRotate(rotate);
+      pdf->setZoom(zoom);
+      pdf->scrollTo(scrollX, scrollY);
     }
     first = gFalse;
   }
@@ -1522,7 +1735,7 @@ void XpdfViewer::cmdOpen(GString *args[], int nArgs,
   if (fileName.isEmpty()) {
     return;
   }
-  open(fileName, 1, "", 0, "");
+  open(fileName, -1, "", 0, "");
 }
 
 void XpdfViewer::cmdOpenErrorWindow(GString *args[], int nArgs,
@@ -1532,7 +1745,29 @@ void XpdfViewer::cmdOpenErrorWindow(GString *args[], int nArgs,
 }
 
 void XpdfViewer::cmdOpenFile(GString *args[], int nArgs, QInputEvent *event) {
-  open(args[0]->getCString(), 1, "", 0, "");
+  open(args[0]->getCString(), -1, "", 0, "");
+}
+
+void XpdfViewer::cmdOpenFile2(GString *args[], int nArgs, QInputEvent *event) {
+  char *file = args[0]->getCString();
+  int page;
+  if (args[1]->getLength() == 0) {
+    page = -1;
+  } else {
+    page = atoi(args[1]->getCString());
+  }
+  char *dest = args[2]->getCString();
+  char *password = args[3]->getCString();
+  GString *location = args[4];
+  if (location->cmp("win") == 0) {
+    app->openInNewWindow(file, page, dest, 0, password);
+  } else if (location->cmp("tab") == 0) {
+    openInNewTab(file, page, dest, 0, password, gTrue);
+  } else if (location->cmp("check") == 0) {
+    checkOpen(file, page, dest, password);
+  } else {
+    open(file, page, dest, 0, password);
+  }
 }
 
 void XpdfViewer::cmdOpenFileAtDest(GString *args[], int nArgs,
@@ -1571,11 +1806,11 @@ void XpdfViewer::cmdOpenFileAtPageIn(GString *args[], int nArgs,
 void XpdfViewer::cmdOpenFileIn(GString *args[], int nArgs,
 			       QInputEvent *event) {
   if (!args[1]->cmp("win")) {
-    app->openInNewWindow(args[0]->getCString(), 1);
+    app->openInNewWindow(args[0]->getCString(), -1);
   } else if (!args[1]->cmp("tab")) {
-    openInNewTab(args[0]->getCString(), 1, "", 0, "", gTrue);
+    openInNewTab(args[0]->getCString(), -1, "", 0, "", gTrue);
   } else {
-    open(args[0]->getCString(), 1, "", 0, "");
+    open(args[0]->getCString(), -1, "", 0, "");
   }
 }
 
@@ -1599,11 +1834,11 @@ void XpdfViewer::cmdOpenIn(GString *args[], int nArgs, QInputEvent *event) {
     return;
   }
   if (!args[0]->cmp("win")) {
-    app->openInNewWindow(fileName, 1);
+    app->openInNewWindow(fileName, -1);
   } else if (!args[0]->cmp("tab")) {
-    openInNewTab(fileName, 1, "", 0, "", gTrue);
+    openInNewTab(fileName, -1, "", 0, "", gTrue);
   } else {
-    open(fileName, 1, "", 0, "");
+    open(fileName, -1, "", 0, "");
   }
 }
 
@@ -1762,6 +1997,8 @@ void XpdfViewer::cmdRun(GString *args[], int nArgs, QInputEvent *event) {
   fmt = args[0];
   i = 0;
   gotSel = gotMouse = gFalse;
+  selPage = mPage = 0;
+  selURX = selURY = selLRX = selLRY = mX = mY = 0;
   while (i < fmt->getLength()) {
     c0 = fmt->getChar(i);
     if (c0 == '%' && i+1 < fmt->getLength()) {
@@ -1838,7 +2075,17 @@ void XpdfViewer::cmdRun(GString *args[], int nArgs, QInputEvent *event) {
     }
   }
 
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+  QString cmdStr(cmd->getCString());
+  QStringList tokens = QProcess::splitCommand(cmdStr);
+  if (!tokens.isEmpty()) {
+    QString program = tokens[0];
+    tokens.removeFirst();
+    QProcess::startDetached(program, tokens);
+  }
+#else
   QProcess::startDetached(cmd->getCString());
+#endif
   delete cmd;
 }
 
@@ -1864,17 +2111,18 @@ void XpdfViewer::cmdSaveImage(GString *args[], int nArgs, QInputEvent *event) {
   execSaveImageDialog();
 }
 
+void XpdfViewer::cmdSaveSession(GString *args[], int nArgs,
+				QInputEvent *event) {
+  app->saveSession(NULL, gTrue);
+}
+
 void XpdfViewer::cmdSaveTabState(GString *args[], int nArgs,
 				 QInputEvent *event) {
-  FILE *f;
-  XpdfWidget *pdf;
-  QString fileName;
-  GString *path, *msg;
-  int i;
-
-  path = globalParams->getTabStateFile();
-  if (!(f = openFile(path->getCString(), "wb"))) {
-    msg = GString::format("Couldn't write the tab file '{0:t}'", path);
+  GString *path = globalParams->getTabStateFile();
+  FILE *f = openFile(path->getCString(), "wb");
+  if (!f) {
+    GString *msg = GString::format("Couldn't write the tab file '{0:t}'",
+				   path);
     QMessageBox::warning(NULL, "Xpdf Error", msg->getCString());
     delete msg;
     delete path;
@@ -1882,11 +2130,37 @@ void XpdfViewer::cmdSaveTabState(GString *args[], int nArgs,
   }
   delete path;
 
-  for (i = 0; i < tabInfo->getLength(); ++i) {
-    pdf = ((XpdfTabInfo *)tabInfo->get(i))->pdf;
-    fileName = pdf->getFileName();
+  fprintf(f, "xpdf-tabstate-2\n");
+
+  for (int i = 0; i < tabInfo->getLength(); ++i) {
+    XpdfWidget *pdf = ((XpdfTabInfo *)tabInfo->get(i))->pdf;
+    QString fileName = pdf->getFileName();
     if (!fileName.isEmpty()) {
-      fprintf(f, "%s\n%d\n", fileName.toUtf8().constData(), pdf->getMidPage());
+      fprintf(f, "%s\n", fileName.toUtf8().constData());
+      char displayModeChar;
+      switch (pdf->getDisplayMode()) {
+      case XpdfWidget::pdfDisplaySingle:
+	displayModeChar = 's';
+	break;
+      case XpdfWidget::pdfDisplayContinuous:
+	displayModeChar = 'c';
+	break;
+      case XpdfWidget::pdfDisplaySideBySideSingle:
+	displayModeChar = 'b';
+	break;
+      case XpdfWidget::pdfDisplaySideBySideContinuous:
+	displayModeChar = 'B';
+	break;
+      case XpdfWidget::pdfDisplayHorizontalContinuous:
+	displayModeChar = 'h';
+	break;
+      default:
+	displayModeChar = 'c';
+	break;
+      }
+      fprintf(f, "%c %d %g %d %d %d\n",
+	      displayModeChar, pdf->getMidPage(), pdf->getZoom(),
+	      pdf->getRotate(), pdf->getScrollX(), pdf->getScrollY());
     }
   }
 
@@ -1988,6 +2262,21 @@ void XpdfViewer::cmdSetSelection(GString *args[], int nArgs,
 				       atof(args[4]->getCString()));
 }
 
+void XpdfViewer::cmdShowAttachmentsPane(GString *args[], int nArgs,
+					QInputEvent *event) {
+  infoComboBox->setCurrentIndex(2);
+}
+
+void XpdfViewer::cmdShowDocumentInfo(GString *args[], int nArgs,
+				     QInputEvent *event) {
+  if (!currentTab->pdf->hasOpenDocument()) {
+    return;
+  }
+  updateDocumentInfoDialog(currentTab->pdf);
+  documentInfoDialog->show();
+  documentInfoDialog->raise();
+}
+
 void XpdfViewer::cmdShowKeyBindings(GString *args[], int nArgs,
 				    QInputEvent *event) {
   if (!keyBindingsDialog) {
@@ -1995,6 +2284,21 @@ void XpdfViewer::cmdShowKeyBindings(GString *args[], int nArgs,
   }
   keyBindingsDialog->show();
   keyBindingsDialog->raise();
+}
+
+void XpdfViewer::cmdShowLayersPane(GString *args[], int nArgs,
+				   QInputEvent *event) {
+  infoComboBox->setCurrentIndex(1);
+}
+
+void XpdfViewer::cmdShowMenuBar(GString *args[], int nArgs,
+				QInputEvent *event) {
+  mainMenu->show();
+}
+
+void XpdfViewer::cmdShowOutlinePane(GString *args[], int nArgs,
+				    QInputEvent *event) {
+  infoComboBox->setCurrentIndex(0);
 }
 
 void XpdfViewer::cmdShowToolbar(GString *args[], int nArgs,
@@ -2069,6 +2373,15 @@ void XpdfViewer::cmdToggleFullScreenMode(GString *args[], int nArgs,
     exitFullScreenMode();
   } else {
     enterFullScreenMode();
+  }
+}
+
+void XpdfViewer::cmdToggleMenuBar(GString *args[], int nArgs,
+				  QInputEvent *event) {
+  if (mainMenu->isVisible()) {
+    cmdHideMenuBar(args, nArgs, event);
+  } else {
+    cmdShowMenuBar(args, nArgs, event);
   }
 }
 
@@ -2153,13 +2466,16 @@ void XpdfViewer::cmdZoomFitWidth(GString *args[], int nArgs,
 }
 
 void XpdfViewer::cmdZoomIn(GString *args[], int nArgs, QInputEvent *event) {
-  double z;
+  double zsf, z;
   int i;
 
-  z = currentTab->pdf->getZoomPercent(currentTab->pdf->getMidPage());
-  for (i = 0; i < zoomComboBox->count(); ++i) {
-    if (zoomComboBoxVals[i] > z) {
-      currentTab->pdf->zoomCentered(zoomComboBoxVals[i]);
+  zsf = app->getZoomScaleFactor();
+  z = currentTab->pdf->getZoomPercent(currentTab->pdf->getMidPage()) / zsf;
+  for (i = 0; i < app->getNZoomValues(); ++i) {
+    // the 1.0001 factor is to allow for floating point jitter when
+    // multiplying and dividing by zoomScaleFactor
+    if (app->getZoomValue(i) > 1.0001 * z) {
+      currentTab->pdf->zoomCentered(app->getZoomValue(i) * zsf);
       zoomComboBox->setCurrentIndex(i);
       updateZoomInfo();
       break;
@@ -2168,13 +2484,16 @@ void XpdfViewer::cmdZoomIn(GString *args[], int nArgs, QInputEvent *event) {
 }
 
 void XpdfViewer::cmdZoomOut(GString *args[], int nArgs, QInputEvent *event) {
-  double z;
+  double zsf, z;
   int i;
 
-  z = currentTab->pdf->getZoomPercent(currentTab->pdf->getMidPage());
-  for (i = zoomComboBox->count() - 1; i >= 0; --i) {
-    if (zoomComboBoxVals[i] < z) {
-      currentTab->pdf->zoomCentered(zoomComboBoxVals[i]);
+  zsf = app->getZoomScaleFactor();
+  z = currentTab->pdf->getZoomPercent(currentTab->pdf->getMidPage()) / zsf;
+  for (i = app->getNZoomValues() - 1; i >= 0; --i) {
+    // the 0.9999 factor is to allow for floating point jitter when
+    // multiplying and dividing by zoomScaleFactor
+    if (app->getZoomValue(i) < 0.9999 * z) {
+      currentTab->pdf->zoomCentered(app->getZoomValue(i) * zsf);
       zoomComboBox->setCurrentIndex(i);
       updateZoomInfo();
       break;
@@ -2191,7 +2510,7 @@ void XpdfViewer::cmdZoomPercent(GString *args[], int nArgs,
   if (z > maxZoom) {
     z = maxZoom;
   }
-  currentTab->pdf->zoomCentered(z);
+  currentTab->pdf->zoomCentered(z * app->getZoomScaleFactor());
   updateZoomInfo();
 }
 
@@ -2201,7 +2520,7 @@ void XpdfViewer::cmdZoomToSelection(GString *args[], int nArgs,
   int pg, xx0, yy0, xx1, yy1;
 
   if (currentTab->pdf->getCurrentSelection(&pg, &x0, &y0, &x1, &y1)) {
-    z = currentTab->pdf->getZoomPercent(pg);
+    z = currentTab->pdf->getZoomPercent(pg) / app->getZoomScaleFactor();
     currentTab->pdf->getCore()->cvtUserToDev(pg, x0, y0, &xx0, &yy0);
     currentTab->pdf->getCore()->cvtUserToDev(pg, x1, y1, &xx1, &yy1);
     rx = (double)currentTab->pdf->getCore()->getWindowWidth()
@@ -2221,6 +2540,26 @@ void XpdfViewer::cmdZoomToSelection(GString *args[], int nArgs,
     }
     currentTab->pdf->zoomToRect(pg, x0, y0, x1, y1);
     updateZoomInfo();
+  }
+}
+
+// Check the find settings menu items and the find text to determine
+// the effective case sensitivity setting.
+int XpdfViewer::getFindCaseFlag() {
+  // could use QString::isLower(), but it's only available in Qt 5.12+
+  if (findCaseSensitiveAction->isChecked()) {
+    return XpdfWidget::findCaseSensitive;
+  } else if (findSmartCaseAction->isChecked()) {
+    QString s = findEdit->text();
+    for (int i = 0; i < s.length(); ++i) {
+      QChar c = s[i];
+      if (c != c.toLower()) {
+	return XpdfWidget::findCaseSensitive;
+      }
+    }
+    return 0;
+  } else {
+    return 0;
   }
 }
 
@@ -2455,18 +2794,17 @@ void XpdfViewer::mouseWheel(QWheelEvent *e) {
 
   // for historical reasons xpdf uses X11 button numbering for mouse
   // wheel events
-  if (e->orientation() == Qt::Vertical) {
-    if (e->delta() > 0) {
-      keyCode = xpdfKeyCodeMousePress4;
-    } else {
-      keyCode = xpdfKeyCodeMousePress5;
-    }
+  QPoint delta = e->angleDelta();
+  if (delta.y() > 0) {
+    keyCode = xpdfKeyCodeMousePress4;
+  } else if (delta.y() < 0) {
+    keyCode = xpdfKeyCodeMousePress5;
+  } else if (delta.x() > 0) {
+    keyCode = xpdfKeyCodeMousePress6;
+  } else if (delta.x() < 0) {
+    keyCode = xpdfKeyCodeMousePress7;
   } else {
-    if (e->delta() > 0) {
-      keyCode = xpdfKeyCodeMousePress6;
-    } else {
-      keyCode = xpdfKeyCodeMousePress7;
-    }
+    return;
   }
   if ((cmds = globalParams->getKeyBinding(keyCode,
 					  getModifiers(e->modifiers()),
@@ -2578,7 +2916,7 @@ void XpdfViewer::dropEvent(QDropEvent *e) {
   if (e->mimeData()->hasUrls()) {
     QUrl url = e->mimeData()->urls().front();
     if (url.isLocalFile()) {
-      openInNewTab(url.toLocalFile(), 1, "", 0, "", gTrue);
+      openInNewTab(url.toLocalFile(), -1, "", 0, "", gTrue);
     }
   }
 }
@@ -2651,6 +2989,10 @@ void XpdfViewer::saveAsMenuAction() {
   execCmd("saveAs", NULL);
 }
 
+void XpdfViewer::loadSessionMenuAction() {
+  execCmd("loadSession", NULL);
+}
+
 void XpdfViewer::saveImageMenuAction() {
   execCmd("saveImage", NULL);
 }
@@ -2715,6 +3057,10 @@ void XpdfViewer::toggleSidebarMenuAction(bool checked) {
 
 void XpdfViewer::viewPageLabelsMenuAction(bool checked) {
   execCmd(checked ? "viewPageLabels" : "viewPageNumbers", NULL);
+}
+
+void XpdfViewer::documentInfoMenuAction() {
+  execCmd("showDocumentInfo", NULL);
 }
 
 
@@ -2801,16 +3147,16 @@ void XpdfViewer::zoomInButtonPressed() {
   execCmd("zoomIn", NULL);
 }
 
-void XpdfViewer::zoomIndexChanged(const QString &zoomText) {
+void XpdfViewer::zoomIndexChanged(int idx) {
+  QString zoomText = zoomComboBox->itemText(idx);
   QString z;
-  GString *cmd;
-
   if (zoomText.endsWith("%")) {
     z = zoomText.left(zoomText.size() - 1);
   } else {
     z = zoomText;
   }
-  cmd = GString::format("zoomPercent({0:s})", z.toLatin1().constData());
+  GString *cmd = GString::format("zoomPercent({0:s})",
+				 z.toLatin1().constData());
   execCmd(cmd->getCString(), NULL);
   delete cmd;
 }
@@ -2871,6 +3217,23 @@ void XpdfViewer::switchTab(QListWidgetItem *current,
       gotoTab(i);
       return;
     }
+  }
+}
+
+void XpdfViewer::tabsReordered(const QModelIndex &srcParent,
+			       int srcStart, int srcEnd,
+			       const QModelIndex &destParent,
+			       int destRow) {
+  // these conditions should always be true, but check just in case
+  if (srcStart == srcEnd &&
+      srcStart >= 0 && srcStart < tabInfo->getLength() &&
+      destRow >= 0 && destRow <= tabInfo->getLength()) {
+    XpdfTabInfo *tab = (XpdfTabInfo *)tabInfo->del(srcStart);
+    int i = destRow;
+    if (i >= srcStart) {
+      --i;
+    }
+    tabInfo->insert(i, tab);
   }
 }
 
@@ -2973,6 +3336,7 @@ void XpdfViewer::createWindow() {
   findErrorTimer->setSingleShot(true);
   connect(findErrorTimer, SIGNAL(timeout()), this, SLOT(clearFindError()));
 
+  documentInfoDialog = NULL;
   keyBindingsDialog = NULL;
   aboutDialog = NULL;
 #if XPDFWIDGET_PRINTING
@@ -3045,7 +3409,12 @@ void XpdfViewer::createToolBar() {
   //--- page number and page count
   // note: the pageNumber widget was created earlier because we need
   // to look at its font size
+#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
+  pageNumber->setFixedWidth(
+		  pageNumber->fontMetrics().horizontalAdvance("00000") + 6);
+#else
   pageNumber->setFixedWidth(pageNumber->fontMetrics().width("00000") + 6);
+#endif
   pageNumber->setToolTip("current page number");
   toolBar->addWidget(pageNumber);
   addToolBarSpacing(2);
@@ -3073,16 +3442,16 @@ void XpdfViewer::createToolBar() {
   addToolBarSpacing(4);
   zoomComboBox = new QComboBox();
   zoomComboBox->setToolTip("change zoom level");
-  for (i = 0; i < nZoomComboBoxVals; ++i) {
-    zoomVal.setNum(zoomComboBoxVals[i]);
+  for (i = 0; i < app->getNZoomValues(); ++i) {
+    zoomVal.setNum(app->getZoomValue(i));
     zoomVal.append('%');
     zoomComboBox->addItem(zoomVal);
   }
   zoomComboBox->setEditable(true);
   zoomComboBox->setInsertPolicy(QComboBox::NoInsert);
   zoomComboBox->setValidator(new ZoomValidator(this));
-  connect(zoomComboBox, SIGNAL(currentIndexChanged(const QString&)),
-	  this, SLOT(zoomIndexChanged(const QString&)));
+  connect(zoomComboBox, SIGNAL(currentIndexChanged(int)),
+	  this, SLOT(zoomIndexChanged(int)));
   // this could use the editingFinished signal, but that's emitted
   // every time the popup is opened and closed, which causes the zoom
   // level to be reset
@@ -3103,7 +3472,11 @@ void XpdfViewer::createToolBar() {
   addToolBarStretch();
   findEdit = new QLineEdit();
   findEdit->setPlaceholderText("find");
+#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
+  findEdit->setFixedWidth(20 * findEdit->fontMetrics().horizontalAdvance("0"));
+#else
   findEdit->setFixedWidth(20 * findEdit->fontMetrics().width("0"));
+#endif
   findEdit->installEventFilter(this);
   toolBar->addWidget(findEdit);
   connect(findEdit, SIGNAL(returnPressed()), this, SLOT(findTextChanged()));
@@ -3117,8 +3490,18 @@ void XpdfViewer::createToolBar() {
   addToolBarButton(QIcon(":/findPrevious-button"),
 		   SLOT(findPrevButtonPressed()), "find previous occurrence");
   QMenu *findSettingsMenu = new QMenu(this);
+  QActionGroup *findCaseGroup = new QActionGroup(findSettingsMenu);
+  findCaseInsensitiveAction = findSettingsMenu->addAction("case insensitive");
+  findCaseInsensitiveAction->setCheckable(true);
+  findCaseGroup->addAction(findCaseInsensitiveAction);
   findCaseSensitiveAction = findSettingsMenu->addAction("case sensitive");
   findCaseSensitiveAction->setCheckable(true);
+  findCaseGroup->addAction(findCaseSensitiveAction);
+  findSmartCaseAction = findSettingsMenu->addAction("smart case");
+  findSmartCaseAction->setCheckable(true);
+  findSmartCaseAction->setChecked(true);
+  findCaseGroup->addAction(findSmartCaseAction);
+  findSettingsMenu->addSeparator();
   findWholeWordsAction = findSettingsMenu->addAction("whole words");
   findWholeWordsAction->setCheckable(true);
   addToolBarMenuButton(QIcon(":/findSettings-button"),
@@ -3177,6 +3560,8 @@ void XpdfViewer::createMainMenu() {
 			 this, SLOT(openInNewWinMenuAction()));
   fileSubmenu->addAction("Reload", this, SLOT(reloadMenuAction()));
   fileSubmenu->addAction("&Save as...", this, SLOT(saveAsMenuAction()));
+  fileSubmenu->addAction("Load last session",
+			 this, SLOT(loadSessionMenuAction()));
   fileSubmenu->addSeparator();
   fileSubmenu->addAction("Save image...", this, SLOT(saveImageMenuAction()));
 #if XPDFWIDGET_PRINTING
@@ -3248,6 +3633,9 @@ void XpdfViewer::createMainMenu() {
   viewSubmenu->addAction("Zoom to selection",
 			 this, SLOT(zoomToSelectionMenuAction()));
 
+  QMenu *toolsSubmenu = mainMenu->addMenu("&Tools");
+  toolsSubmenu->addAction("Document info",
+			  this, SLOT(documentInfoMenuAction()));
 
   QMenu *windowSubmenu = mainMenu->addMenu("&Window");
   windowSubmenu->addAction("New tab", this, SLOT(newTabMenuAction()));
@@ -3275,8 +3663,13 @@ void XpdfViewer::createXpdfPopupMenu() {
 
   popupMenu = new QMenu(this);
   popupMenuSignalMapper = new QSignalMapper(this);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+  connect(popupMenuSignalMapper, SIGNAL(mappedInt(int)),
+	  this, SLOT(popupMenuAction(int)));
+#else
   connect(popupMenuSignalMapper, SIGNAL(mapped(int)),
 	  this, SLOT(popupMenuAction(int)));
+#endif
 
   n = globalParams->getNumPopupMenuCmds();
   if (n == 0) {
@@ -3302,9 +3695,17 @@ QWidget *XpdfViewer::createTabPane() {
 
   tabList = new QListWidget();
   tabList->setSelectionMode(QAbstractItemView::SingleSelection);
+  tabList->setDragEnabled(true);
+  tabList->setDragDropMode(QAbstractItemView::InternalMove);
+  tabList->viewport()->setAcceptDrops(true);
+  tabList->setDropIndicatorShown(true);
   connect(tabList, SIGNAL(currentItemChanged(QListWidgetItem*,
 					     QListWidgetItem*)),
 	  this, SLOT(switchTab(QListWidgetItem*, QListWidgetItem*)));
+  connect(tabList->model(), SIGNAL(rowsMoved(const QModelIndex&, int, int,
+					     const QModelIndex, int)),
+	  this, SLOT(tabsReordered(const QModelIndex&, int, int,
+				   const QModelIndex&, int)));
   tabPaneLayout->addWidget(tabList);
 
   QPushButton *newTabBtn = new QPushButton("+ tab");
@@ -3329,7 +3730,7 @@ QWidget *XpdfViewer::createInfoPane() {
   infoComboBox->addItem("layers");
   infoComboBox->addItem("attachments");
   infoLayout->addWidget(infoComboBox);
-  connect(infoComboBox, SIGNAL(activated(int)),
+  connect(infoComboBox, SIGNAL(currentIndexChanged(int)),
 	  this, SLOT(infoComboBoxChanged(int)));
 
   infoStack = new QStackedLayout();
@@ -3506,6 +3907,10 @@ void XpdfViewer::addTab() {
 void XpdfViewer::closeTab(XpdfTabInfo *tab) {
   int i;
 
+  app->startUpdatePagesFile();
+  app->updatePagesFile(tab->pdf->getFileName(), tab->pdf->getMidPage());
+  app->finishUpdatePagesFile();
+
   for (i = 0; i < tabInfo->getLength(); ++i) {
     if ((XpdfTabInfo *)tabInfo->get(i) == tab) {
       break;
@@ -3591,7 +3996,8 @@ void XpdfViewer::updateZoomInfo() {
   } else {
     pg = 1;
   }
-  z = (int)floor(currentTab->pdf->getZoomPercent(pg) + 0.5);
+  z = (int)floor(currentTab->pdf->getZoomPercent(pg) /
+		 app->getZoomScaleFactor() + 0.5);
   zoomStr.setNum(z);
   zoomStr.append('%');
   zoomComboBox->setEditText(zoomStr);
@@ -3624,10 +4030,12 @@ void XpdfViewer::updateSelectModeInfo() {
 // It updates all visible info related to the document.
 void XpdfViewer::updateDocInfo() {
   //--- window title
-  QString windowTitle("XpdfReader");
+  QString windowTitle;
   if (currentTab->pdf->hasOpenDocument()) {
-    windowTitle += ": ";
-    windowTitle += currentTab->pdf->getFileName();
+    windowTitle = currentTab->pdf->getFileName();
+    windowTitle += " - XpdfReader";
+  } else {
+    windowTitle = "XpdfReader";
   }
   setWindowTitle(windowTitle);
 
@@ -3635,8 +4043,18 @@ void XpdfViewer::updateDocInfo() {
   QString tabTitle;
   if (currentTab->pdf->hasOpenDocument()) {
     tabTitle = currentTab->pdf->getFileName();
+    int i = (int)tabTitle.lastIndexOf('/');
+#ifdef _WIN32
+    int j = (int)tabTitle.lastIndexOf('\\');
+    if (j > i) {
+      i = j;
+    }
+#endif
+    if (i >= 0) {
+      tabTitle = tabTitle.mid(i + 1) + " [" + tabTitle.left(i + 1) + "]";
+    }
   } else {
-    tabTitle = "empty";
+    tabTitle = "(empty)";
   }
   currentTab->listItem->setText(tabTitle);
   currentTab->listItem->setToolTip(tabTitle);
@@ -3721,12 +4139,18 @@ void XpdfViewer::fillAttachmentList() {
     saveBtn = new QPushButton("save");
     saveBtn->setStyleSheet("padding-left:4px; padding-right:4px;");
     btnGroup->addButton(saveBtn, i);
+    btnGroup->setId(saveBtn, i);
     currentTab->attachmentList->setCellWidget(i, 0, saveBtn);
     item = new QTableWidgetItem(currentTab->pdf->getEmbeddedFileName(i));
     currentTab->attachmentList->setItem(i, 1, item);
   }
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+  connect(btnGroup, SIGNAL(idClicked(int)),
+	  this, SLOT(attachmentSaveClicked(int)));
+#else
   connect(btnGroup, SIGNAL(buttonClicked(int)),
 	  this, SLOT(attachmentSaveClicked(int)));
+#endif
   currentTab->attachmentList->resizeRowsToContents();
   currentTab->attachmentList->resizeColumnsToContents();
 }
@@ -3764,6 +4188,592 @@ void XpdfViewer::showFindError() {
 void XpdfViewer::clearFindError() {
   findErrorTimer->stop();
   findEdit->setStyleSheet("");
+}
+
+void XpdfViewer::createDocumentInfoDialog() {
+  documentInfoDialog = new QDialog(this);
+  documentInfoDialog->setWindowTitle("XpdfReader Document Info");
+
+  QVBoxLayout *vbox = new QVBoxLayout();
+  documentInfoDialog->setLayout(vbox);
+
+  QTabWidget *tabs = new QTabWidget();
+  vbox->addWidget(tabs);
+
+  documentInfoMetadataTab = new QTextBrowser();
+  documentInfoMetadataTab->setLineWrapMode(QTextEdit::NoWrap);
+  tabs->addTab(documentInfoMetadataTab, "Metadata");
+
+  documentInfoFontsTab = new QTextBrowser();
+  documentInfoFontsTab->setLineWrapMode(QTextEdit::NoWrap);
+  tabs->addTab(documentInfoFontsTab, "Fonts");
+}
+
+void XpdfViewer::updateDocumentInfoDialog(XpdfWidget *view) {
+  if (!view->hasOpenDocument()) {
+    return;
+  }
+
+  if (!documentInfoDialog) {
+    createDocumentInfoDialog();
+  }
+
+  documentInfoDialog->setWindowTitle(view->getFileName() +
+				     " - XpdfReader Document Info");
+  documentInfoMetadataTab->setHtml(createDocumentInfoMetadataHTML(view));
+  documentInfoFontsTab->setHtml(createDocumentInfoFontsHTML(view));
+
+  //--- tweak the dialog size
+  int w = documentInfoMetadataTab->contentsMargins().left() +
+          (int)documentInfoMetadataTab->document()->idealWidth() +
+          documentInfoMetadataTab->contentsMargins().right() +
+          50;
+  int w1 = documentInfoFontsTab->contentsMargins().left() +
+           (int)documentInfoFontsTab->document()->idealWidth() +
+           documentInfoFontsTab->contentsMargins().right() +
+           50;
+  if (w1 > w) {
+    w = w1;
+  }
+  int h = 20 * documentInfoMetadataTab->fontMetrics().lineSpacing() + 75;
+  documentInfoDialog->resize(w, h);
+}
+
+static QString parseInfoDate(GString *s) {
+  char *p = s->getCString();
+  if (p[0] == 'D' && p[1] == ':') {
+    p += 2;
+  }
+  int year, mon, day, hour, min, sec, n;
+  if ((n = sscanf(p, "%4d%2d%2d%2d%2d%2d",
+		  &year, &mon, &day, &hour, &min, &sec)) < 1) {
+    return QString();
+  }
+  switch (n) {
+  case 1: mon = 1;
+  case 2: day = 1;
+  case 3: hour = 0;
+  case 4: min = 0;
+  case 5: sec = 0;
+  }
+  struct tm tmStruct;
+  tmStruct.tm_year = year - 1900;
+  tmStruct.tm_mon = mon - 1;
+  tmStruct.tm_mday = day;
+  tmStruct.tm_hour = hour;
+  tmStruct.tm_min = min;
+  tmStruct.tm_sec = sec;
+  tmStruct.tm_wday = -1;
+  tmStruct.tm_yday = -1;
+  tmStruct.tm_isdst = -1;
+  // compute the tm_wday and tm_yday fields
+  char buf[256];
+  if (!(mktime(&tmStruct) != (time_t)-1 &&
+	strftime(buf, sizeof(buf), "%c", &tmStruct))) {
+    return QString();
+  }
+  return QString(buf);
+}
+
+static QString parseXMPDate(GString *s) {
+  int year, mon, day, hour, min, sec, tz;
+  char buf[256];
+  char *p = s->getCString();
+  if (isdigit(p[0]) && isdigit(p[1]) && isdigit(p[2]) && isdigit(p[3])) {
+    buf[0] = p[0];
+    buf[1] = p[1];
+    buf[2] = p[2];
+    buf[3] = p[3];
+    buf[4] = '\0';
+    year = atoi(buf);
+    p += 4;
+  } else {
+    return QString();
+  }
+  mon = day = 1;
+  hour = min = sec = 0;
+  tz = 2000;
+  if (p[0] == '-' && isdigit(p[1]) && isdigit(p[2])) {
+    buf[0] = p[1];
+    buf[1] = p[2];
+    buf[2] = '\0';
+    mon = atoi(buf);
+    p += 3;
+    if (p[0] == '-' && isdigit(p[1]) && isdigit(p[2])) {
+      buf[0] = p[1];
+      buf[1] = p[2];
+      buf[2] = '\0';
+      day = atoi(buf);
+      p += 3;
+      if (p[0] == 'T' && isdigit(p[1]) && isdigit(p[2]) &&
+	  p[3] == ':' && isdigit(p[4]) && isdigit(p[5])) {
+	buf[0] = p[1];
+	buf[1] = p[2];
+	buf[2] = '\0';
+	hour = atoi(buf);
+	buf[0] = p[4];
+	buf[1] = p[5];
+	buf[2] = '\0';
+	min = atoi(buf);
+	p += 6;
+	if (p[0] == ':' && isdigit(p[1]) && isdigit(p[2])) {
+	  buf[0] = p[1];
+	  buf[1] = p[2];
+	  buf[2] = '\0';
+	  sec = atoi(buf);
+	  if (p[0] == '.' && isdigit(p[1])) {
+	    p += 2;
+	  }
+	}
+	if ((p[0] == '+' || p[0] == '-') &&
+	    isdigit(p[1]) && isdigit(p[2]) && p[3] == ':' &&
+	    isdigit(p[4]) && isdigit(p[5])) {
+	  buf[0] = p[1];
+	  buf[1] = p[2];
+	  buf[2] = '\0';
+	  tz = atoi(buf);
+	  buf[0] = p[4];
+	  buf[1] = p[5];
+	  buf[2] = '\0';
+	  tz = tz * 60 + atoi(buf);
+	  tz = tz * 60;
+	  if (p[0] == '-') {
+	    tz = -tz;
+	  }
+	}
+      }
+    }
+  }
+
+  struct tm tmStruct;
+  tmStruct.tm_year = year - 1900;
+  tmStruct.tm_mon = mon - 1;
+  tmStruct.tm_mday = day;
+  tmStruct.tm_hour = hour;
+  tmStruct.tm_min = min;
+  tmStruct.tm_sec = sec;
+  tmStruct.tm_wday = -1;
+  tmStruct.tm_yday = -1;
+  tmStruct.tm_isdst = -1;
+  // compute the tm_wday and tm_yday fields
+  //~ this ignores the timezone
+  if (!(mktime(&tmStruct) != (time_t)-1 &&
+	strftime(buf, sizeof(buf), "%c", &tmStruct))) {
+    return QString();
+  }
+  return QString(buf);
+}
+
+static QString createInfoString(Object *infoDict, const char *infoKey,
+				ZxDoc *xmp, const char *xmpKey1,
+				const char *xmpKey2, GBool parseDate) {
+  //-- check the XMP metadata
+  if (xmp) {
+    ZxElement *rdf = xmp->getRoot();
+    if (rdf->isElement("x:xmpmeta")) {
+      rdf = rdf->findFirstChildElement("rdf:RDF");
+    }
+    if (rdf && rdf->isElement("rdf:RDF")) {
+      for (ZxNode *node = rdf->getFirstChild();
+	   node;
+	   node = node->getNextChild()) {
+	if (node->isElement("rdf:Description")) {
+	  ZxElement *elem;
+	  if ((elem = node->findFirstChildElement(xmpKey1)) ||
+	      (xmpKey2 && (elem = node->findFirstChildElement(xmpKey2)))) {
+	    ZxElement *child;
+	    ZxNode *node2;
+	    if ((child = elem->findFirstChildElement("rdf:Alt")) ||
+		(child = elem->findFirstChildElement("rdf:Seq"))) {
+	      if ((node2 = child->findFirstChildElement("rdf:li"))) {
+		node2 = node2->getFirstChild();
+	      }
+	    } else {
+	      node2 = elem->getFirstChild();
+	    }
+	    if (node2 && node2->isCharData()) {
+	      QString value;
+	      if (parseDate) {
+		value = parseXMPDate(((ZxCharData *)node2)->getData());
+	      }
+	      if (value.isEmpty()) {
+		value = QString::fromUtf8(
+			    ((ZxCharData *)node2)->getData()->getCString());
+	      }
+	      return QString("<tr><td>") + infoKey + ":&nbsp;</td><td>"
+		     + value + "</td></tr>\n";
+	    }
+	  }
+	}
+      }
+    }
+  }
+
+  //-- check the info dictionary
+  if (infoDict->isDict()) {
+    Object obj;
+    if (infoDict->dictLookup(infoKey, &obj)->isString()) {
+      QString value;
+      if (parseDate) {
+	value = parseInfoDate(obj.getString());
+      }
+      if (value.isEmpty()) {
+	TextString *ts = new TextString(obj.getString());
+	GString *utf8 = ts->toUTF8();
+	value = QString::fromUtf8(utf8->getCString());
+	delete utf8;
+	delete ts;
+      }
+      obj.free();
+      return QString("<tr><td>") + infoKey + ":&nbsp;</td><td>"
+	     + value + "</td></tr>\n";
+    }
+    obj.free();
+  }
+
+  return QString();
+}
+
+QString XpdfViewer::createDocumentInfoMetadataHTML(XpdfWidget *view) {
+  PDFDoc *doc = view->getCore()->getDoc();
+  QString html("<table>\n");
+
+  // doc info
+  Object info;
+  doc->getDocInfo(&info);
+  GString *metadata;
+  ZxDoc *xmp;
+  if ((metadata = doc->readMetadata())) {
+    xmp = ZxDoc::loadMem(metadata->getCString(), metadata->getLength());
+  } else {
+    xmp = NULL;
+  }
+  html += createInfoString(&info, "Title",        xmp, "dc:title",        NULL,             gFalse);
+  html += createInfoString(&info, "Subject",      xmp, "dc:description",  NULL,             gFalse);
+  html += createInfoString(&info, "Keywords",     xmp, "pdf:Keywords",    NULL,             gFalse);
+  html += createInfoString(&info, "Author",       xmp, "dc:creator",      NULL,             gFalse);
+  html += createInfoString(&info, "Creator",      xmp, "xmp:CreatorTool", NULL,             gFalse);
+  html += createInfoString(&info, "Producer",     xmp, "pdf:Producer",    NULL,             gFalse);
+  html += createInfoString(&info, "CreationDate", xmp, "xap:CreateDate",  "xmp:CreateDate", gTrue);
+  html += createInfoString(&info, "ModDate",      xmp, "xap:ModifyDate",  "xmp:ModifyDate", gTrue);
+  if (xmp) {
+    delete xmp;
+  }
+  if (metadata) {
+    delete metadata;
+  }
+  info.free();
+
+  // tagging info
+  if (doc->getStructTreeRoot()->isDict()) {
+    html += "<tr><td>Tagged:&nbsp;</td><td>yes</td></tr>\n";
+  } else {
+    html += "<tr><td>Tagged:&nbsp;</td><td>no</td></tr>\n";
+  }
+  
+  // form info
+  Object *acroForm = doc->getCatalog()->getAcroForm();
+  if (acroForm->isDict()) {
+    Object xfa;
+    acroForm->dictLookup("XFA", &xfa);
+    if (xfa.isStream() || xfa.isArray()) {
+      if (doc->getCatalog()->getNeedsRendering()) {
+	html += "<tr><td>Form:&nbsp;</td><td>dynamic XFA</td></tr>\n";
+      } else {
+	html += "<tr><td>Form:&nbsp;</td><td>static XFA</td></tr>\n";
+      }
+    } else {
+      html += "<tr><td>Form:&nbsp;</td><td>AcroForm</td></tr>\n";
+    }
+    xfa.free();
+  } else {
+    html += "<tr><td>Form:&nbsp;</td><td>none</td></tr>\n";
+  }
+
+  // page count
+  html += QString("<tr><td>Pages:&nbsp;</td><td>%1</td></tr>\n")
+            .arg(doc->getNumPages());
+
+  // encryption info
+  if (doc->isEncrypted()) {
+    int permFlags, keyLength, encVersion;
+    GBool ownerPasswordOk;
+    CryptAlgorithm encAlgorithm;
+    doc->getXRef()->getEncryption(&permFlags, &ownerPasswordOk, &keyLength,
+				  &encVersion, &encAlgorithm);
+    html += QString("<tr><td>Encrypted:&nbsp;</td><td>%1 %2-bit</td></tr>\n")
+              .arg(encAlgorithm == cryptRC4 ? "RC4" : "AES")
+              .arg(keyLength * 8);
+    html += QString("<tr><td>Permissions:&nbsp;</td><td>print:%1 copy:%2 change:%3 addNotes:%4</td></tr>\n")
+              .arg(doc->okToPrint(gTrue) ? "yes" : "no")
+	      .arg(doc->okToCopy(gTrue) ? "yes" : "no")
+	      .arg(doc->okToChange(gTrue) ? "yes" : "no")
+	      .arg(doc->okToAddNotes(gTrue) ? "yes" : "no");
+  } else {
+    html += QString("<tr><td>Encrypted:&nbsp;</td><td>no</td></tr>\n");
+  }
+
+  // page size
+  html += QString("<tr><td>Page size:&nbsp;</td><td>%1 x %2 pts (rotated %3 degrees)</td></tr>\n")
+            .arg(doc->getPageCropWidth(1), 0, 'g')
+            .arg(doc->getPageCropHeight(1), 0, 'g')
+            .arg(doc->getPageRotate(1));
+
+  // linearization info
+  html += QString("<tr><td>Optimized:&nbsp;</td><td>%1</td></tr>\n")
+            .arg(doc->isLinearized() ? "yes" : "no");
+
+  // PDF version
+  html += QString("<tr><td>PDF version:&nbsp;</td><td>%1</td></tr>\n")
+            .arg(doc->getPDFVersion(), 0, 'f', 1);
+
+  html += "</table>\n";
+
+  return html;
+}
+
+static GBool scanFontsCheckObject(Object *in, Object *out,
+				  PDFDoc *doc, char *seenObjs) {
+  if (!in->isRef()) {
+    in->copy(out);
+    return gTrue;
+  }
+  int objNum = in->getRefNum();
+  if (objNum < 0 || objNum >= doc->getXRef()->getNumObjects()) {
+    out->initNull();
+    return gTrue;
+  }
+  if (seenObjs[objNum]) {
+    out->initNull();
+    return gFalse;
+  }
+  seenObjs[objNum] = (char)1;
+  in->fetch(doc->getXRef(), out);
+  return gTrue;
+}
+
+static QString scanFont(Dict *fontDict, PDFDoc *doc) {
+  Ref ref;
+  ref.num = ref.gen = 0;
+  GfxFont *font = GfxFont::makeFont(doc->getXRef(), "F0", ref, fontDict);
+  if (!font) {
+    return QString();
+  }
+
+  // font name
+  GString *name = font->getName();
+
+  // font type
+  const char *type;
+  switch (font->getType()) {
+  case fontUnknownType:
+  default:              type = "unknown";           break;
+  case fontType1:       type = "Type 1";            break;
+  case fontType1C:      type = "Type 1C";           break;
+  case fontType1COT:    type = "Type 1C (OT)";      break;
+  case fontType3:       type = "Type 3";            break;
+  case fontTrueType:    type = "TrueType";          break;
+  case fontTrueTypeOT:  type = "TrueType (OT)";     break;
+  case fontCIDType0:    type = "CID Type 0";        break;
+  case fontCIDType0C:   type = "CID Type 0C";       break;
+  case fontCIDType0COT: type = "CID Type 0C (OT)";  break;
+  case fontCIDType2:    type = "CID TrueType";      break;
+  case fontCIDType2OT:  type = "CID TrueType (OT)"; break;
+  }
+
+  // check for an embedded font
+  GBool emb;
+  if (font->getType() == fontType3) {
+    emb = gTrue;
+  } else {
+    Ref embRef;
+    emb = font->getEmbeddedFontID(&embRef);
+  }
+
+  // problematic for text extraction
+  GBool prob = font->problematicForUnicode();
+
+  QString html = QString("<tr><td>%1&nbsp;</td><td>%2&nbsp;</td><td align=\"center\">%3</td><td align=\"center\">%4</td></tr>\n")
+                   .arg(name ? name->getCString() : "[none]")
+                   .arg(type)
+                   .arg(emb ? "yes" : "no")
+                   .arg(prob ? "X" : "");
+
+  delete font;
+
+  return html;
+}
+
+static QString scanFonts(Dict *resDict, PDFDoc *doc, char *seenObjs);
+
+static QString scanFonts(Object *obj, PDFDoc *doc, char *seenObjs) {
+  QString html;
+  Object obj2;
+  if (scanFontsCheckObject(obj, &obj2, doc, seenObjs) && obj2.isDict()) {
+    html += scanFonts(obj2.getDict(), doc, seenObjs);
+  }
+  obj2.free();
+  return html;
+}
+
+static QString scanFonts(Dict *resDict, PDFDoc *doc, char *seenObjs) {
+  QString html;
+
+  // scan the fonts in this resource dictionary
+  Object fontDict1, fontDict2;
+  resDict->lookupNF("Font", &fontDict1);
+  if (scanFontsCheckObject(&fontDict1, &fontDict2, doc, seenObjs) &&
+      fontDict2.isDict()) {
+    for (int i = 0; i < fontDict2.dictGetLength(); ++i) {
+      Object font1, font2;
+      fontDict2.dictGetValNF(i, &font1);
+      if (scanFontsCheckObject(&font1, &font2, doc, seenObjs) &&
+	  font2.isDict()) {
+	html += scanFont(font2.getDict(), doc);
+      }
+      font2.free();
+      font1.free();
+    }
+  }
+  fontDict2.free();
+  fontDict1.free();
+
+  // recursively scan any resource dictionaries in XObjects in this
+  // resource dictionary
+  Object xObjDict1, xObjDict2;
+  resDict->lookupNF("XObject", &xObjDict1);
+  if (scanFontsCheckObject(&xObjDict1, &xObjDict2, doc, seenObjs) &&
+      xObjDict2.isDict()) {
+    for (int i = 0; i < xObjDict2.dictGetLength(); ++i) {
+      Object xObj1, xObj2;
+      xObjDict2.dictGetValNF(i, &xObj1);
+      if (scanFontsCheckObject(&xObj1, &xObj2, doc, seenObjs) &&
+	  xObj2.isStream()) {
+	Object resObj;
+	xObj2.streamGetDict()->lookupNF("Resources", &resObj);
+	html += scanFonts(&resObj, doc, seenObjs);
+	resObj.free();
+      }
+      xObj2.free();
+      xObj1.free();
+    }
+  }
+  xObjDict2.free();
+  xObjDict1.free();
+
+  // recursively scan any resource dictionaries in Patterns in this
+  // resource dictionary
+  Object patternDict1, patternDict2;
+  resDict->lookupNF("Pattern", &patternDict1);
+  if (scanFontsCheckObject(&patternDict1, &patternDict2, doc, seenObjs) &&
+      patternDict2.isDict()) {
+    for (int i = 0; i < patternDict2.dictGetLength(); ++i) {
+      Object pattern1, pattern2;
+      patternDict2.dictGetValNF(i, &pattern1);
+      if (scanFontsCheckObject(&pattern1, &pattern2, doc, seenObjs) &&
+	  pattern2.isStream()) {
+	Object resObj;
+	pattern2.streamGetDict()->lookupNF("Resources", &resObj);
+	html += scanFonts(&resObj, doc, seenObjs);
+	resObj.free();
+      }
+      pattern2.free();
+      pattern1.free();
+    }
+  }
+  patternDict2.free();
+  patternDict1.free();
+
+  // recursively scan any resource dictionaries in ExtGStates in this
+  // resource dictionary
+  Object gsDict1, gsDict2;
+  resDict->lookupNF("ExtGState", &gsDict1);
+  if (scanFontsCheckObject(&gsDict1, &gsDict2, doc, seenObjs) &&
+      gsDict2.isDict()) {
+    for (int i = 0; i < gsDict2.dictGetLength(); ++i) {
+      Object gs1, gs2;
+      gsDict2.dictGetValNF(i, &gs1);
+      if (scanFontsCheckObject(&gs1, &gs2, doc, seenObjs) &&
+	  gs2.isDict()) {
+	Object smask1, smask2;
+	gs2.dictLookupNF("SMask", &smask1);
+	if (scanFontsCheckObject(&smask1, &smask2, doc, seenObjs) &&
+	    smask2.isDict()) {
+	  Object smaskGroup1, smaskGroup2;
+	  smask2.dictLookupNF("G", &smaskGroup1);
+	  if (scanFontsCheckObject(&smaskGroup1, &smaskGroup2, doc, seenObjs) &&
+	      smaskGroup2.isStream()) {
+	    Object resObj;
+	    smaskGroup2.streamGetDict()->lookupNF("Resources", &resObj);
+	    html += scanFonts(&resObj, doc, seenObjs);
+	    resObj.free();
+	  }
+	  smaskGroup2.free();
+	  smaskGroup1.free();
+	}
+	smask2.free();
+	smask1.free();
+      }
+      gs2.free();
+      gs1.free();
+    }
+  }
+  gsDict2.free();
+  gsDict1.free();
+
+  return html;
+}
+
+QString XpdfViewer::createDocumentInfoFontsHTML(XpdfWidget *view) {
+  PDFDoc *doc = view->getCore()->getDoc();
+
+  QString html("<table>\n");
+  html += "<tr bgcolor=\"#aaffaa\"><th>&nbsp;name&nbsp;</th><th>&nbsp;type&nbsp;</th><th>&nbsp;embedded&nbsp;</th><th>&nbsp;problematic&nbsp;</th></tr>\n";
+
+  int numObjects = doc->getXRef()->getNumObjects();
+  char *seenObjs = (char *)gmalloc(numObjects);
+  memset(seenObjs, 0, numObjects);
+
+  Annots *annots = doc->getAnnots();
+  for (int pg = 1; pg <= doc->getNumPages(); ++pg) {
+    Page *page = doc->getCatalog()->getPage(pg);
+    Dict *resDict = page->getResourceDict();
+    if (resDict) {
+      html += scanFonts(resDict, doc, seenObjs);
+    }
+    Object obj1, obj2;
+    int nAnnots = annots->getNumAnnots(pg);
+    for (int i = 0; i < nAnnots; ++i) {
+      if (annots->getAnnot(pg, i)->getAppearance(&obj1)->isStream()) {
+	obj1.streamGetDict()->lookupNF("Resources", &obj2);
+	html += scanFonts(&obj2, doc, seenObjs);
+	obj2.free();
+      }
+      obj1.free();
+    }
+  }
+  AcroForm *form = doc->getCatalog()->getForm();
+  if (form) {
+    Object obj1, obj2;
+    for (int i = 0; i < form->getNumFields(); ++i) {
+      form->getField(i)->getResources(&obj1);
+      if (obj1.isArray()) {
+	for (int j = 0; j < obj1.arrayGetLength(); ++j) {
+	  obj1.arrayGetNF(j, &obj2);
+	  html += scanFonts(&obj2, doc, seenObjs);
+	  obj2.free();
+	}
+      } else if (obj1.isDict()) {
+	html += scanFonts(obj1.getDict(), doc, seenObjs);
+      }
+      obj1.free();
+    }
+  }
+
+  gfree(seenObjs);
+
+  html += "</table>\n";
+  return html;
 }
 
 void XpdfViewer::createKeyBindingsDialog() {
@@ -3981,7 +4991,11 @@ void XpdfViewer::execSaveImageDialog() {
 
   QLineEdit *pageEdit = new QLineEdit();
   regionBox->addWidget(pageEdit);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
+  pageEdit->setFixedWidth(8 * pageEdit->fontMetrics().horizontalAdvance("0"));
+#else
   pageEdit->setFixedWidth(8 * pageEdit->fontMetrics().width("0"));
+#endif
   int pg = currentTab->pdf->getMidPage();
   pageEdit->setText(QString().setNum(pg));
   connect(pageEdit, SIGNAL(textChanged(const QString&)),
@@ -3997,6 +5011,21 @@ void XpdfViewer::execSaveImageDialog() {
   regionBox->addWidget(selectionBtn);
   selectionBtn->setEnabled(currentTab->pdf->hasSelection());
 
+  grid->addWidget(new QLabel("Color:"), 1, 0);
+
+  QHBoxLayout *colorBox = new QHBoxLayout();
+  grid->addLayout(colorBox, 1, 1);
+
+  QComboBox *colorCombo = new QComboBox();
+  colorBox->addWidget(colorCombo);
+  colorCombo->setEditable(false);
+  colorCombo->addItem("RGB");
+  colorCombo->addItem("Gray");
+  colorCombo->addItem("Monochrome");
+  colorCombo->setCurrentIndex(0);
+
+  colorBox->addStretch();
+
   grid->addWidget(new QLabel("Resolution:"), 2, 0);
 
   QHBoxLayout *resolutionBox = new QHBoxLayout();
@@ -4004,7 +5033,12 @@ void XpdfViewer::execSaveImageDialog() {
 
   QLineEdit *resolutionEdit = new QLineEdit();
   resolutionBox->addWidget(resolutionEdit);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
+  resolutionEdit->setFixedWidth(
+		      8 * pageEdit->fontMetrics().horizontalAdvance("0"));
+#else
   resolutionEdit->setFixedWidth(8 * pageEdit->fontMetrics().width("0"));
+#endif
   int r = (int)floor(currentTab->pdf->getZoomPercent(pg) * 0.72 + 0.5);
   resolutionEdit->setText(QString().setNum(r));
 
@@ -4056,6 +5090,17 @@ void XpdfViewer::execSaveImageDialog() {
       currentTab->pdf->getCurrentSelection(&page, &x0, &y0, &x1, &y1);
     }
     int fmt = formatCombo->currentIndex();
+    XpdfWidget::ImageColorMode color;
+    if (colorCombo->currentIndex() == 1) {
+      color = XpdfWidget::pdfImageColorGray;
+    } else if (colorCombo->currentIndex() == 2) {
+      color = XpdfWidget::pdfImageColorMono;
+      if (strcmp(saveImageFormats[fmt].qImageFormat, "TIFF")) {
+	color = XpdfWidget::pdfImageColorGray;
+      }
+    } else {
+      color = XpdfWidget::pdfImageColorRGB;
+    }
     QString fileName =
         QFileDialog::getSaveFileName(this, "Save Image",
 				     QString(),
@@ -4063,9 +5108,10 @@ void XpdfViewer::execSaveImageDialog() {
     if (!fileName.isEmpty()) {
       QImage img;
       if (wholePage) {
-	img = currentTab->pdf->convertPageToImage(page, res);
+	img = currentTab->pdf->convertPageToImage(page, res, false, color);
       } else {
-	img = currentTab->pdf->convertRegionToImage(page, x0, y0, x1, y1, res);
+	img = currentTab->pdf->convertRegionToImage(page, x0, y0, x1, y1, res,
+						    false, color);
       }
       img.save(fileName, saveImageFormats[fmt].qImageFormat);
     }

@@ -30,6 +30,12 @@
 #endif
 #include "gtypes.h"
 
+// Windows 10 supports long paths - with a registry setting, and only
+// with Unicode (...W) functions.
+#ifdef _WIN32
+#  define winMaxLongPath 32767
+#endif
+
 class GString;
 
 //------------------------------------------------------------------------
@@ -54,6 +60,12 @@ extern GBool isAbsolutePath(char *path);
 // Make this path absolute by prepending current directory (if path is
 // relative) or prepending user's directory (if path starts with '~').
 extern GString *makePathAbsolute(GString *path);
+
+// Returns true if [path] exists and is a regular file.
+extern GBool pathIsFile(const char *path);
+
+// Returns true if [path] exists and is a directory.
+extern GBool pathIsDir(const char *path);
 
 // Get the modification time for <fileName>.  Returns 0 if there is an
 // error.
@@ -80,6 +92,9 @@ extern GString *fileNameToUTF8(char *path);
 
 // Convert a file name from UCS-2 to UTF-8.
 extern GString *fileNameToUTF8(wchar_t *path);
+
+// Convert a file name from the OEM code page to UTF-8.
+extern GString *fileNameMultiByteToUTF8(char *path);
 
 // Convert a file name from UTF-8 to UCS-2.  [out] has space for
 // [outSize] wchar_t elements (including the trailing zero).  Returns
