@@ -11,10 +11,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma interface
-#endif
-
 #include <stdio.h>
 #include "gtypes.h"
 #include "GfxFont.h"
@@ -99,7 +95,12 @@ public:
 class TextFontInfo {
 public:
 
+  // Create a TextFontInfo for the current font in [state].
   TextFontInfo(GfxState *state);
+
+  // Create a dummy TextFontInfo.
+  TextFontInfo();
+
   ~TextFontInfo();
 
   GBool matches(GfxState *state);
@@ -116,6 +117,9 @@ public:
 
   // Get the width of the 'm' character, if available.
   double getMWidth() { return mWidth; }
+
+  double getAscent() { return ascent; }
+  double getDescent() { return descent; }
 
   Ref getFontID() { return fontID; }
 
@@ -225,6 +229,7 @@ public:
   double getBaseline();
   int getRotation() { return rot; }
   GList *getWords() { return words; }
+  Unicode *getUnicode() { return text; }
   int getLength() { return len; }
   double getEdge(int idx) { return edge[idx]; }
   GBool getHyphenated() { return hyphenated; }
@@ -468,13 +473,31 @@ public:
   TextWordList *makeWordListForRect(double xMin, double yMin,
 				    double xMax, double yMax);
 
+  // Get the primary rotation of text on the page.
+  int getPrimaryRotation() { return primaryRot; }
+
   // Returns true if the primary character direction is left-to-right,
   // false if it is right-to-left.
   GBool primaryDirectionIsLR();
 
+  // Get the counter values.
+  int getNumVisibleChars() { return nVisibleChars; }
+  int getNumInvisibleChars() { return nInvisibleChars; }
+  int getNumRemovedDupChars() { return nRemovedDupChars; }
+
   // Returns true if any of the fonts used on this page are likely to
   // be problematic when converting text to Unicode.
   GBool problematicForUnicode() { return problematic; }
+
+  // Add a 'special' character to this TextPage.  This is currently
+  // used by pdftohtml to insert markers for form fields.
+  void addSpecialChar(double xMin, double yMin, double xMax, double yMax,
+		      int rot, TextFontInfo *font, double fontSize,
+		      Unicode u);
+
+  // Remove characters that fall inside a region.
+  void removeChars(double xMin, double yMin, double xMax, double yMax,
+		   double xOverlapThresh, double yOverlapThresh);
 
 private:
 
@@ -524,6 +547,8 @@ private:
 		char *eol, int eolLen);
   void encodeFragment(Unicode *text, int len, UnicodeMap *uMap,
 		      GBool primaryLR, GString *s);
+  GBool unicodeEffectiveTypeLOrNum(Unicode u, Unicode left, Unicode right);
+  GBool unicodeEffectiveTypeR(Unicode u, Unicode left, Unicode right);
 
   // analysis
   int rotateChars(GList *charsA);
@@ -545,13 +570,17 @@ private:
   void findGaps(GList *charsA, int rot,
 		double *xMinOut, double *yMinOut,
 		double *xMaxOut, double *yMaxOut,
-		double *avgFontSizeOut,
+		double *avgFontSizeOut, double *minFontSizeOut,
+		GList *splitLines,
 		TextGaps *horizGaps, TextGaps *vertGaps);
+  void mergeSplitLines(GList *charsA, int rot, GList *splitLines);
   void tagBlock(TextBlock *blk);
   void insertLargeChars(GList *largeChars, TextBlock *blk);
   void insertLargeCharsInFirstLeaf(GList *largeChars, TextBlock *blk);
   void insertLargeCharInLeaf(TextChar *ch, TextBlock *blk);
-  void insertIntoTree(TextBlock *subtree, TextBlock *primaryTree);
+  void insertIntoTree(TextBlock *subtree, TextBlock *primaryTree,
+		      GBool doReorder);
+  void reorderBlocks(TextBlock *blk);
   void insertColumnIntoTree(TextBlock *column, TextBlock *tree);
   void insertClippedChars(GList *clippedChars, TextBlock *tree);
   TextBlock *findClippedCharLeaf(TextChar *ch, TextBlock *tree);
@@ -569,7 +598,9 @@ private:
 		      double xMin, double yMin, double xMax, double yMax);
   void getLineChars(TextBlock *blk, GList *charsA);
   double computeWordSpacingThreshold(GList *charsA, int rot);
+  void adjustCombiningChars(GList *charsA, int rot);
   int getCharDirection(TextChar *ch);
+  int getCharDirection(TextChar *ch, TextChar *left, TextChar *right);
   int assignPhysLayoutPositions(GList *columns);
   void assignLinePhysPositions(GList *columns);
   void computeLinePhysWidth(TextLine *line, UnicodeMap *uMap);
@@ -619,9 +650,14 @@ private:
   GList *chars;			// [TextChar]
   GList *fonts;			// all font info objects used on this
 				//   page [TextFontInfo]
+  int primaryRot;		// primary rotation
 
   GList *underlines;		// [TextUnderline]
   GList *links;			// [TextLink]
+
+  int nVisibleChars;		// number of visible chars on the page
+  int nInvisibleChars;		// number of invisible chars on the page
+  int nRemovedDupChars;		// number of duplicate chars removed
 
   GList *findCols;		// text used by the findText**/findPoint**
 				//   functions [TextColumn]
@@ -704,7 +740,8 @@ public:
   virtual void drawChar(GfxState *state, double x, double y,
 			double dx, double dy,
 			double originX, double originY,
-			CharCode c, int nBytes, Unicode *u, int uLen);
+			CharCode c, int nBytes, Unicode *u, int uLen,
+			GBool fill, GBool stroke, GBool makePath);
   virtual void incCharCount(int nChars);
   virtual void beginActualText(GfxState *state, Unicode *u, int uLen);
   virtual void endActualText(GfxState *state);
@@ -762,6 +799,11 @@ public:
 
   // Turn extra processing for HTML conversion on or off.
   void enableHTMLExtras(GBool html) { control.html = html; }
+
+  // Get the counter values.
+  int getNumVisibleChars() { return text->nVisibleChars; }
+  int getNumInvisibleChars() { return text->nInvisibleChars; }
+  int getNumRemovedDupChars() { return text->nRemovedDupChars; }
 
 private:
 

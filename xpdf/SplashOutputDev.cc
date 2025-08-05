@@ -8,10 +8,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma implementation
-#endif
-
 #include <string.h>
 #include <math.h>
 #include <limits.h>
@@ -598,6 +594,8 @@ struct SplashTransparencyGroup {
   SplashBitmap *tBitmap;	// bitmap for transparency group
   GfxColorSpace *blendingColorSpace;
   GBool isolated;
+  GBool inSoftMask;		// true if this, or any containing
+				//   group, is a soft mask
 
   //----- modified region in tBitmap
   int modXMin, modYMin, modXMax, modYMax;
@@ -654,7 +652,8 @@ SplashOutputDev::SplashOutputDev(SplashColorMode colorModeA,
 
   font = NULL;
   needFontUpdate = gFalse;
-  textClipPath = NULL;
+  savedTextPath = NULL;
+  savedClipPath = NULL;
 
   transpGroupStack = NULL;
 
@@ -731,8 +730,11 @@ SplashOutputDev::~SplashOutputDev() {
   if (bitmap) {
     delete bitmap;
   }
-  if (textClipPath) {
-    delete textClipPath;
+  if (savedTextPath) {
+    delete savedTextPath;
+  }
+  if (savedClipPath) {
+    delete savedClipPath;
   }
 }
 
@@ -1074,7 +1076,10 @@ void SplashOutputDev::setOverprintMask(GfxState *state,
   Guint mask;
   GfxCMYK cmyk;
 
-  if (overprintFlag && globalParams->getOverprintPreview()) {
+  // Adobe ignores overprint in soft masks.
+  if (overprintFlag &&
+      !(transpGroupStack && transpGroupStack->inSoftMask) &&
+      globalParams->getOverprintPreview()) {
     mask = colorSpace->getOverprintMask();
     // The OPM (overprintMode) setting is only relevant when the color
     // space is DeviceCMYK or is "implicitly converted to DeviceCMYK".
@@ -1882,10 +1887,10 @@ void SplashOutputDev::tilingPatternFill(GfxState *state, Gfx *gfx,
     idet = 1 / idet;
     clipXC = 0.5 * (clipXMin + clipXMax);
     clipYC = 0.5 * (clipYMin + clipYMax);
-    ix = (int)((yStepX * (tileYMin - clipYC) - (tileXMin - clipXC) * yStepY)
-	       * idet + 0.5);
-    iy = (int)((xStepX * (clipYC - tileYMin) - (clipXC - tileXMin) * xStepY)
-	       * idet + 0.5);
+    ix = (int)floor((yStepX * (tileYMin - clipYC)
+		     - (tileXMin - clipXC) * yStepY) * idet + 0.5);
+    iy = (int)floor((xStepX * (clipYC - tileYMin)
+		     - (clipXC - tileXMin) * xStepY) * idet + 0.5);
     adjXMin = (int)floor(tileXMin + ix * xStepX + iy * yStepX + 0.5);
     adjYMin = (int)floor(tileYMin + ix * xStepY + iy * yStepY + 0.5);
     sx = tileW / (tileXMax - tileXMin);
@@ -1895,38 +1900,6 @@ void SplashOutputDev::tilingPatternFill(GfxState *state, Gfx *gfx,
     yStepX = (int)floor(sx * yStepX + 0.5);
     yStepY = (int)floor(sy * yStepY + 0.5);
   }
-
-  // compute tile matrix = PTM * BTM * Mtranslate * Mscale * iCTM
-  //                     = mat * CTM * Mtranslate * Mscale * iCTM
-  ctm = state->getCTM();
-  idet = 1 / (ctm[0] * ctm[3] - ctm[1] * ctm[2]);
-  ictm[0] = ctm[3] * idet;
-  ictm[1] = -ctm[1] * idet;
-  ictm[2] = -ctm[2] * idet;
-  ictm[3] = ctm[0] * idet;
-  ictm[4] = (ctm[2] * ctm[5] - ctm[3] * ctm[4]) * idet;
-  ictm[5] = (ctm[1] * ctm[4] - ctm[0] * ctm[5]) * idet;
-  // mat * CTM
-  mat1[0] = mat[0] * ctm[0] + mat[1] * ctm[2];
-  mat1[1] = mat[0] * ctm[1] + mat[1] * ctm[3];
-  mat1[2] = mat[2] * ctm[0] + mat[3] * ctm[2];
-  mat1[3] = mat[2] * ctm[1] + mat[3] * ctm[3];
-  mat1[4] = mat[4] * ctm[0] + mat[5] * ctm[2] + ctm[4];
-  mat1[5] = mat[4] * ctm[1] + mat[5] * ctm[3] + ctm[5];
-  // mat * CTM * (Mtranslate * Mscale)
-  mat2[0] = mat1[0] * sx;
-  mat2[1] = mat1[1] * sy;
-  mat2[2] = mat1[2] * sx;
-  mat2[3] = mat1[3] * sy;
-  mat2[4] = mat1[4] * sx - sx * tileXMin;
-  mat2[5] = mat1[5] * sy - sy * tileYMin;
-  // mat * CTM * (Mtranslate * Mscale) * iCTM
-  tileMat[0] = mat2[0] * ictm[0] + mat2[1] * ictm[2];
-  tileMat[1] = mat2[0] * ictm[1] + mat2[1] * ictm[3];
-  tileMat[2] = mat2[2] * ictm[0] + mat2[3] * ictm[2];
-  tileMat[3] = mat2[2] * ictm[1] + mat2[3] * ictm[3];
-  tileMat[4] = mat2[4] * ictm[0] + mat2[5] * ictm[2] + ictm[4];
-  tileMat[5] = mat2[4] * ictm[1] + mat2[5] * ictm[3] + ictm[5];
 
   // compute tiling range:
   // - look at the four corners of the clipping bbox
@@ -1989,10 +1962,65 @@ void SplashOutputDev::tilingPatternFill(GfxState *state, Gfx *gfx,
   } else if (ty > tyMax) {
     tyMax = ty;
   }
-  ixMin = (int)floor(txMin);
-  ixMax = (int)ceil(txMax);
-  iyMin = (int)floor(tyMin);
-  iyMax = (int)ceil(tyMax);
+  ixMin = (int)ceil(txMin);
+  ixMax = (int)floor(txMax) + 1;
+  iyMin = (int)ceil(tyMin);
+  iyMax = (int)floor(tyMax) + 1;
+
+  // special case: pattern tile is larger than clipping bbox
+  if (ixMax - ixMin == 1 && iyMax - iyMin == 1) {
+    // reduce the tile size to just the clipping bbox -- this improves
+    // performance in cases where just a small portion of one tile is
+    // needed
+    tileW = (int)(clipXMax - clipXMin + 0.5);
+    tileH = (int)(clipYMax - clipYMin + 0.5);
+    if (tileW < 1) {
+      tileW = 1;
+    }
+    if (tileH < 1) {
+      tileH = 1;
+    }
+    tileXMin += clipXMin - (adjXMin + ixMin * xStepX + iyMin * yStepX);
+    tileYMin += clipYMin - (adjYMin + ixMin * xStepY + iyMin * yStepY);
+    ixMin = 0;
+    iyMin = 0;
+    ixMax = 1;
+    iyMax = 1;
+    adjXMin = clipXMin;
+    adjYMin = clipYMin;
+  }
+
+  // compute tile matrix = PTM * BTM * Mtranslate * Mscale * iCTM
+  //                     = mat * CTM * Mtranslate * Mscale * iCTM
+  ctm = state->getCTM();
+  idet = 1 / (ctm[0] * ctm[3] - ctm[1] * ctm[2]);
+  ictm[0] = ctm[3] * idet;
+  ictm[1] = -ctm[1] * idet;
+  ictm[2] = -ctm[2] * idet;
+  ictm[3] = ctm[0] * idet;
+  ictm[4] = (ctm[2] * ctm[5] - ctm[3] * ctm[4]) * idet;
+  ictm[5] = (ctm[1] * ctm[4] - ctm[0] * ctm[5]) * idet;
+  // mat * CTM
+  mat1[0] = mat[0] * ctm[0] + mat[1] * ctm[2];
+  mat1[1] = mat[0] * ctm[1] + mat[1] * ctm[3];
+  mat1[2] = mat[2] * ctm[0] + mat[3] * ctm[2];
+  mat1[3] = mat[2] * ctm[1] + mat[3] * ctm[3];
+  mat1[4] = mat[4] * ctm[0] + mat[5] * ctm[2] + ctm[4];
+  mat1[5] = mat[4] * ctm[1] + mat[5] * ctm[3] + ctm[5];
+  // mat * CTM * (Mtranslate * Mscale)
+  mat2[0] = mat1[0] * sx;
+  mat2[1] = mat1[1] * sy;
+  mat2[2] = mat1[2] * sx;
+  mat2[3] = mat1[3] * sy;
+  mat2[4] = mat1[4] * sx - sx * tileXMin;
+  mat2[5] = mat1[5] * sy - sy * tileYMin;
+  // mat * CTM * (Mtranslate * Mscale) * iCTM
+  tileMat[0] = mat2[0] * ictm[0] + mat2[1] * ictm[2];
+  tileMat[1] = mat2[0] * ictm[1] + mat2[1] * ictm[3];
+  tileMat[2] = mat2[2] * ictm[0] + mat2[3] * ictm[2];
+  tileMat[3] = mat2[2] * ictm[1] + mat2[3] * ictm[3];
+  tileMat[4] = mat2[4] * ictm[0] + mat2[5] * ictm[2] + ictm[4];
+  tileMat[5] = mat2[4] * ictm[1] + mat2[5] * ictm[3] + ictm[5];
 
   // create a temporary bitmap
   origBitmap = bitmap;
@@ -2068,8 +2096,8 @@ void SplashOutputDev::tilingPatternFill(GfxState *state, Gfx *gfx,
   } else {
     for (iy = iyMin; iy < iyMax; ++iy) {
       for (ix = ixMin; ix < ixMax; ++ix) {
-	x = (int)(adjXMin + ix * xStepX + iy * yStepX + 0.5);
-	y = (int)(adjYMin + ix * xStepY + iy * yStepY + 0.5);
+	x = (int)floor(adjXMin + ix * xStepX + iy * yStepX + 0.5);
+	y = (int)floor(adjYMin + ix * xStepY + iy * yStepY + 0.5);
 	if (overprintMaskBitmap) {
 	  splash->compositeWithOverprint(tileBitmap, overprintMaskBitmap,
 					 0, 0, x, y, tileW, tileH,
@@ -2195,27 +2223,24 @@ void SplashOutputDev::drawChar(GfxState *state, double x, double y,
 			       double dx, double dy,
 			       double originX, double originY,
 			       CharCode code, int nBytes,
-			       Unicode *u, int uLen) {
-  SplashPath *path;
-  int render;
-  GBool doFill, doStroke, doClip;
-  SplashStrokeAdjustMode strokeAdjust;
-  double m[4];
-  GBool horiz;
-
+			       Unicode *u, int uLen,
+			       GBool fill, GBool stroke, GBool makePath) {
   if (skipHorizText || skipRotatedText) {
+    double m[4];
     state->getFontTransMat(&m[0], &m[1], &m[2], &m[3]);
     // this matches the 'diagonal' test in TextPage::updateFont()
-    horiz = m[0] > 0 && fabs(m[1]) < 0.001 &&
-            fabs(m[2]) < 0.001 && m[3] < 0;
+    GBool horiz = m[0] > 0 && fabs(m[1]) < 0.001 &&
+                  fabs(m[2]) < 0.001 && m[3] < 0;
     if ((skipHorizText && horiz) || (skipRotatedText && !horiz)) {
       return;
     }
   }
 
+  fill = fill && !state->getFillColorSpace()->isNonMarking();
+  stroke = stroke && !state->getStrokeColorSpace()->isNonMarking();
+
   // check for invisible text -- this is used by Acrobat Capture
-  render = state->getRender();
-  if (render == 3) {
+  if (!fill && !stroke && !makePath) {
     return;
   }
 
@@ -2229,13 +2254,8 @@ void SplashOutputDev::drawChar(GfxState *state, double x, double y,
   x -= originX;
   y -= originY;
 
-  doFill = !(render & 1) && !state->getFillColorSpace()->isNonMarking();
-  doStroke = ((render & 3) == 1 || (render & 3) == 2) &&
-             !state->getStrokeColorSpace()->isNonMarking();
-  doClip = render & 4;
-
-  path = NULL;
-  if (doStroke || doClip) {
+  SplashPath *path = NULL;
+  if (stroke || makePath) {
     if ((path = font->getGlyphPath(code))) {
       path->offset((SplashCoord)x, (SplashCoord)y);
     }
@@ -2244,14 +2264,19 @@ void SplashOutputDev::drawChar(GfxState *state, double x, double y,
   // don't use stroke adjustment when stroking text -- the results
   // tend to be ugly (because characters with horizontal upper or
   // lower edges get misaligned relative to the other characters)
-  strokeAdjust = splashStrokeAdjustOff; // make gcc happy
-  if (doStroke) {
-    strokeAdjust = splash->getStrokeAdjust();
+  SplashStrokeAdjustMode savedStrokeAdjust = splashStrokeAdjustOff;
+  if (stroke) {
+    savedStrokeAdjust = splash->getStrokeAdjust();
     splash->setStrokeAdjust(splashStrokeAdjustOff);
   }
 
-  // fill and stroke
-  if (doFill && doStroke) {
+  // the possible operations are:
+  //   - fill
+  //   - stroke
+  //   - fill + stroke
+  //   - makePath
+
+  if (fill && stroke) {
     if (path) {
       setOverprintMask(state, state->getFillColorSpace(),
 		       state->getFillOverprint(), state->getOverprintMode(),
@@ -2263,42 +2288,105 @@ void SplashOutputDev::drawChar(GfxState *state, double x, double y,
       splash->stroke(path);
     }
 
-  // fill
-  } else if (doFill) {
+  } else if (fill) {
     setOverprintMask(state, state->getFillColorSpace(),
 		     state->getFillOverprint(), state->getOverprintMode(),
 		     state->getFillColor());
     splash->fillChar((SplashCoord)x, (SplashCoord)y, code, font);
 
-  // stroke
-  } else if (doStroke) {
+  } else if (stroke) {
     if (path) {
       setOverprintMask(state, state->getStrokeColorSpace(),
 		       state->getStrokeOverprint(), state->getOverprintMode(),
 		       state->getStrokeColor());
       splash->stroke(path);
     }
-  }
 
-  // clip
-  if (doClip) {
+  } else if (makePath) {
     if (path) {
-      if (textClipPath) {
-	textClipPath->append(path);
+      if (savedTextPath) {
+	savedTextPath->append(path);
       } else {
-	textClipPath = path;
+	savedTextPath = path;
 	path = NULL;
       }
     }
   }
 
-  if (doStroke) {
-    splash->setStrokeAdjust(strokeAdjust);
+  if (stroke) {
+    splash->setStrokeAdjust(savedStrokeAdjust);
   }
 
   if (path) {
     delete path;
   }
+}
+
+void SplashOutputDev::fillTextPath(GfxState *state) {
+  if (!savedTextPath) {
+    return;
+  }
+  setOverprintMask(state, state->getFillColorSpace(),
+		   state->getFillOverprint(), state->getOverprintMode(),
+		   state->getFillColor());
+  splash->fill(savedTextPath, gFalse);
+}
+
+void SplashOutputDev::strokeTextPath(GfxState *state) {
+  if (!savedTextPath) {
+    return;
+  }
+  setOverprintMask(state, state->getStrokeColorSpace(),
+		   state->getStrokeOverprint(), state->getOverprintMode(),
+		   state->getStrokeColor());
+  splash->stroke(savedTextPath);
+}
+
+void SplashOutputDev::clipToTextPath(GfxState *state) {
+  if (!savedTextPath) {
+    return;
+  }
+  splash->clipToPath(savedTextPath, gFalse);
+}
+
+void SplashOutputDev::clipToTextStrokePath(GfxState *state) {
+  if (!savedTextPath) {
+    return;
+  }
+  SplashPath *path = splash->makeStrokePath(savedTextPath,
+					    state->getLineWidth(),
+					    state->getLineCap(),
+					    state->getLineJoin());
+  splash->clipToPath(path, gFalse);
+  delete path;
+}
+
+void SplashOutputDev::clearTextPath(GfxState *state) {
+  if (savedTextPath) {
+    delete savedTextPath;
+    savedTextPath = NULL;
+  }
+}
+
+void SplashOutputDev::addTextPathToSavedClipPath(GfxState *state) {
+  if (savedTextPath) {
+    if (savedClipPath) {
+      savedClipPath->append(savedTextPath);
+      delete savedTextPath;
+    } else {
+      savedClipPath = savedTextPath;
+    }
+    savedTextPath = NULL;
+  }
+}
+
+void SplashOutputDev::clipToSavedClipPath(GfxState *state) {
+  if (!savedClipPath) {
+    return;
+  }
+  splash->clipToPath(savedClipPath, gFalse);
+  delete savedClipPath;
+  savedClipPath = NULL;
 }
 
 GBool SplashOutputDev::beginType3Char(GfxState *state, double x, double y,
@@ -2656,11 +2744,6 @@ void SplashOutputDev::drawType3Glyph(GfxState *state, T3FontCache *t3Font,
 }
 
 void SplashOutputDev::endTextObject(GfxState *state) {
-  if (textClipPath) {
-    splash->clipToPath(textClipPath, gFalse);
-    delete textClipPath;
-    textClipPath = NULL;
-  }
 }
 
 struct SplashOutImageMaskData {
@@ -2722,7 +2805,8 @@ void SplashOutputDev::drawImageMask(GfxState *state, Object *ref, Stream *str,
   imgTag = makeImageTag(ref, gfxRenderingIntentRelativeColorimetric, NULL);
   splash->fillImageMask(imgTag,
 			&imageMaskSrc, &imgMaskData, width, height, mat,
-			t3GlyphStack != NULL, interpolate);
+			t3GlyphStack != NULL, interpolate,
+			globalParams->getImageMaskAntialias());
 
   if (inlineImg) {
     while (imgMaskData.y < height) {
@@ -2772,12 +2856,16 @@ void SplashOutputDev::setSoftMaskFromImageMask(GfxState *state,
 		     mapStrokeAdjustMode[globalParams->getStrokeAdjust()]);
   maskSplash->setEnablePathSimplification(
 		     globalParams->getEnablePathSimplification());
+  if (splash->getSoftMask()) {
+    maskSplash->setSoftMask(splash->getSoftMask(), gFalse);
+  }
   clearMaskRegion(state, maskSplash, 0, 0, 1, 1);
   maskColor[0] = 0xff;
   maskSplash->setFillPattern(new SplashSolidColor(maskColor));
   imgTag = makeImageTag(ref, gfxRenderingIntentRelativeColorimetric, NULL);
   maskSplash->fillImageMask(imgTag, &imageMaskSrc, &imgMaskData,
-			    width, height, mat, gFalse, interpolate);
+			    width, height, mat, gFalse, interpolate,
+			    globalParams->getImageMaskAntialias());
   delete imgTag;
   delete imgMaskData.imgStr;
   str->close();
@@ -3273,7 +3361,8 @@ void SplashOutputDev::drawMaskedImage(GfxState *state, Object *ref,
     maskSplash->setFillPattern(new SplashSolidColor(maskColor));
     // use "glyph mode" here to get the correct scaled size
     maskSplash->fillImageMask(NULL, &imageMaskSrc, &imgMaskData,
-			      maskWidth, maskHeight, mat, gTrue, interpolate);
+			      maskWidth, maskHeight, mat, gTrue, interpolate,
+			      globalParams->getImageMaskAntialias());
     delete imgMaskData.imgStr;
     maskStr->close();
     delete maskSplash;
@@ -3818,15 +3907,15 @@ void SplashOutputDev::clearMaskRegion(GfxState *state,
   }
 }
 
-void SplashOutputDev::beginTransparencyGroup(GfxState *state, double *bbox,
-					     GfxColorSpace *blendingColorSpace,
-					     GBool isolated, GBool knockout,
-					     GBool forSoftMask) {
+GBool SplashOutputDev::beginTransparencyGroup(GfxState *state, double *bbox,
+					      GfxColorSpace *blendingColorSpace,
+					      GBool isolated, GBool knockout,
+					      GBool forSoftMask) {
   SplashTransparencyGroup *transpGroup;
   SplashBitmap *backdropBitmap;
   SplashColor color;
   double xMin, yMin, xMax, yMax, x, y;
-  int bw, bh, tx, ty, w, h, i;
+  int bw, bh, tx, ty, w, h, xx, yy, i;
 
   // transform the bbox
   state->transform(bbox[0], bbox[1], &x, &y);
@@ -3899,21 +3988,45 @@ void SplashOutputDev::beginTransparencyGroup(GfxState *state, double *bbox,
   } else if (ty >= bh) {
     ty = bh - 1;
   }
-  w = (int)ceil(xMax) - tx + 1;
-  // NB bw and tx are both non-negative, so 'bw - tx' can't overflow
-  if (bw - tx < w) {
-    w = bw - tx;
-  }
-  if (w < 1) {
+  xx = (int)ceil(xMax);
+  if (xx < tx) {
     w = 1;
+  } else if (xx > bw - 1) {
+    // NB bw and tx are both non-negative, so 'bw - tx' can't overflow
+    w = bw - tx;
+  } else {
+    w = xx - tx + 1;
   }
-  h = (int)ceil(yMax) - ty + 1;
-  // NB bh and ty are both non-negative, so 'bh - ty' can't overflow
-  if (bh - ty < h) {
-    h = bh - ty;
-  }
-  if (h < 1) {
+  yy = (int)ceil(yMax);
+  if (yy < ty) {
     h = 1;
+  } else if (yy > bh - 1) {
+    // NB bh and ty are both non-negative, so 'bh - ty' can't overflow
+    h = bh - ty;
+  } else {
+    h = yy - ty + 1;
+  }
+
+  // optimization: a non-isolated group drawn with alpha=1 and
+  // Blend=Normal and backdrop alpha=0 is equivalent to drawing
+  // directly onto the backdrop (i.e., a regular non-t-group Form)
+  // notes:
+  // - if we are already in a non-isolated group, it means the
+  //   backdrop alpha is non-zero (otherwise the parent non-isolated
+  //   group would have been optimized away)
+  // - if there is a soft mask in place, then source alpha is not 1
+  //   (i.e., source alpha = fillOpacity * softMask)
+  // - both the parent and child groups must be non-knockout
+  if (!isolated &&
+      !splash->getInNonIsolatedGroup() &&
+      !knockout &&
+      !splash->getInKnockoutGroup() &&
+      !forSoftMask &&
+      !splash->getSoftMask() &&
+      state->getFillOpacity() == 1 &&
+      state->getBlendMode() == gfxBlendNormal &&
+      splash->checkTransparentRect(tx, ty, w, h)) {
+    return gFalse;
   }
 
   // push a new stack entry
@@ -3922,6 +4035,8 @@ void SplashOutputDev::beginTransparencyGroup(GfxState *state, double *bbox,
   transpGroup->ty = ty;
   transpGroup->blendingColorSpace = blendingColorSpace;
   transpGroup->isolated = isolated;
+  transpGroup->inSoftMask = (transpGroupStack && transpGroupStack->inSoftMask)
+                            || forSoftMask;
   transpGroup->next = transpGroupStack;
   transpGroupStack = transpGroup;
 
@@ -4042,6 +4157,8 @@ void SplashOutputDev::beginTransparencyGroup(GfxState *state, double *bbox,
   state->shiftCTM(-tx, -ty);
   updateCTM(state, 0, 0, 0, 0, 0, 0);
   ++nestCount;
+
+  return gTrue;
 }
 
 void SplashOutputDev::endTransparencyGroup(GfxState *state) {

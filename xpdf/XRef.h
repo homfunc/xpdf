@@ -11,10 +11,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma interface
-#endif
-
 #include "gtypes.h"
 #include "gfile.h"
 #include "Object.h"
@@ -69,6 +65,9 @@ public:
 
   // Get the error code (if isOk() returns false).
   int getErrorCode() { return errCode; }
+
+  // Was the xref constructed by the repair code?
+  GBool isRepaired() { return repaired; }
 
   // Set the encryption parameters.
   void setEncryption(int permFlagsA, GBool ownerPasswordOkA,
@@ -135,6 +134,8 @@ private:
   int rootNum, rootGen;		// catalog dict
   GBool ok;			// true if xref table is valid
   int errCode;			// error code (if <ok> is false)
+  GBool repaired;		// set if the xref table was constructed by
+				//   the repair code
   Object trailerDict;		// trailer dictionary
   GFileOffset lastXRefPos;	// offset of last xref table
   GFileOffset lastStartxrefPos;	// offset of 'startxref' at end of file
@@ -178,8 +179,9 @@ private:
   GBool constructXRefEntry(int num, int gen, GFileOffset pos,
 			   XRefEntryType type);
   GBool getObjectStreamObject(int objStrNum, int objIdx,
-			      int objNum, Object *obj);
-  ObjectStream *getObjectStream(int objStrNum);
+			      int objNum, Object *obj, int recursion);
+  ObjectStream *getObjectStreamFromCache(int objStrNum);
+  void addObjectStreamToCache(ObjectStream *objStr);
   void cleanObjectStreamCache();
   GFileOffset strToFileOffset(char *s);
 };

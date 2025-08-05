@@ -8,10 +8,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma implementation
-#endif
-
 #include <stdio.h>
 #include <string.h>
 #include "gmem.h"
@@ -232,6 +228,10 @@ CharCodeToUnicode *CharCodeToUnicode::make8BitToUnicode(Unicode *toUnicode) {
   return new CharCodeToUnicode(NULL, toUnicode, 256, gTrue, NULL, 0, 0);
 }
 
+CharCodeToUnicode *CharCodeToUnicode::make16BitToUnicode(Unicode *toUnicode) {
+  return new CharCodeToUnicode(NULL, toUnicode, 65536, gTrue, NULL, 0, 0);
+}
+
 CharCodeToUnicode *CharCodeToUnicode::parseCMap(GString *buf, int nBits) {
   CharCodeToUnicode *ctu;
   GStringIndex idx;
@@ -270,7 +270,18 @@ GBool CharCodeToUnicode::parseCMap1(int (*getCharFunc)(void *), void *data,
   pst = new PSTokenizer(getCharFunc, data);
   pst->getToken(tok1, sizeof(tok1), &n1);
   while (pst->getToken(tok2, sizeof(tok2), &n2)) {
-    if (!strcmp(tok2, "usecmap")) {
+    if (!strcmp(tok1, "begincodespacerange")) {
+      if (globalParams->getIgnoreWrongSizeToUnicode() &&
+	  tok2[0] == '<' && tok2[n2 - 1] == '>' &&
+	  n2 - 2 != nBits / 4) {
+	error(errSyntaxWarning, -1,
+	      "Incorrect character size in ToUnicode CMap");
+	ok = gFalse;
+	break;
+      }
+      while (pst->getToken(tok1, sizeof(tok1), &n1) &&
+	     strcmp(tok1, "endcodespacerange")) ;
+    } else if (!strcmp(tok2, "usecmap")) {
       if (tok1[0] == '/') {
 	name = new GString(tok1 + 1);
 	if ((f = globalParams->findToUnicodeFile(name))) {
@@ -461,6 +472,7 @@ GBool CharCodeToUnicode::parseCMap1(int (*getCharFunc)(void *), void *data,
       pst->getToken(tok1, sizeof(tok1), &n1);
     } else {
       strcpy(tok1, tok2);
+      n1 = n2;
     }
   }
   delete pst;
@@ -470,24 +482,17 @@ GBool CharCodeToUnicode::parseCMap1(int (*getCharFunc)(void *), void *data,
 void CharCodeToUnicode::addMapping(CharCode code, char *uStr, int n,
 				   int offset) {
   CharCode oldLen, i;
-#if 1 //~utf16
   Unicode u[maxUnicodeString];
   int uLen, j;
-#else
-  Unicode u;
-  int j;
-#endif
 
   if (code > 0xffffff) {
     // This is an arbitrary limit to avoid integer overflow issues.
     // (I've seen CMaps with mappings for <ffffffff>.)
     return;
   }
-#if 1 //~utf16
   if ((uLen = parseUTF16String(uStr, n, u)) == 0) {
     return;
   }
-#endif
   if (code >= mapLen) {
     oldLen = mapLen;
     mapLen = mapLen ? 2 * mapLen : 256;
@@ -499,7 +504,6 @@ void CharCodeToUnicode::addMapping(CharCode code, char *uStr, int n,
       map[i] = 0;
     }
   }
-#if 1 //~utf16
   if (uLen == 1) {
     map[code] = u[0] + offset;
   } else {
@@ -517,34 +521,6 @@ void CharCodeToUnicode::addMapping(CharCode code, char *uStr, int n,
     sMap[sMapLen].len = uLen;
     ++sMapLen;
   }
-#else //~utf16
-  if (n <= 4) {
-    if (!parseHex(uStr, n, &u)) {
-      error(errSyntaxWarning, -1, "Illegal entry in ToUnicode CMap");
-      return;
-    }
-    map[code] = u + offset;
-  } else {
-    if (sMapLen >= sMapSize) {
-      sMapSize = sMapSize + 16;
-      sMap = (CharCodeToUnicodeString *)
-	       greallocn(sMap, sMapSize, sizeof(CharCodeToUnicodeString));
-    }
-    map[code] = 0;
-    sMap[sMapLen].c = code;
-    if ((sMap[sMapLen].len = n / 4) > maxUnicodeString) {
-      sMap[sMapLen].len = maxUnicodeString;
-    }
-    for (j = 0; j < sMap[sMapLen].len; ++j) {
-      if (!parseHex(uStr + j*4, 4, &sMap[sMapLen].u[j])) {
-	error(errSyntaxWarning, -1, "Illegal entry in ToUnicode CMap");
-	return;
-      }
-    }
-    sMap[sMapLen].u[sMap[sMapLen].len - 1] += offset;
-    ++sMapLen;
-  }
-#endif //~utf16
 }
 
 // Convert a UTF-16BE hex string into a sequence of up to

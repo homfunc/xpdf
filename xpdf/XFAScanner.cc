@@ -8,10 +8,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma implementation
-#endif
-
 #include "GString.h"
 #include "GHash.h"
 #include "Object.h"
@@ -293,8 +289,10 @@ void XFAScanner::scanNode(ZxElement *elem,
   }
 
   if (elem->isElement("field")) {
-    scanField(elem, childName, childFullName, exclGroupName,
-	      dataElem, formValues);
+    if (childName && childFullName) {
+      scanField(elem, childName, childFullName, exclGroupName,
+		dataElem, formValues);
+    }
   } else {
     GString *childExclGroupName;
     if (elem->isElement("exclGroup")) {

@@ -8,10 +8,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma implementation
-#endif
-
 #include <stdlib.h>
 #include <limits.h>
 #include "gmempp.h"
@@ -1147,6 +1143,7 @@ JBIG2CodeTable::~JBIG2CodeTable() {
 JBIG2Stream::JBIG2Stream(Stream *strA, Object *globalsStreamA):
   FilterStream(strA)
 {
+  decoded = gFalse;
   pageBitmap = NULL;
 
   arithDecoder = new JArithmeticDecoder();
@@ -1205,10 +1202,79 @@ Stream *JBIG2Stream::copy() {
 }
 
 void JBIG2Stream::reset() {
-  GList *t;
-
   segments = new GList();
   globalSegments = new GList();
+  decoded = gFalse;
+}
+
+void JBIG2Stream::close() {
+  if (pageBitmap) {
+    delete pageBitmap;
+    pageBitmap = NULL;
+  }
+  if (segments) {
+    deleteGList(segments, JBIG2Segment);
+    segments = NULL;
+  }
+  if (globalSegments) {
+    deleteGList(globalSegments, JBIG2Segment);
+    globalSegments = NULL;
+  }
+  dataPtr = dataEnd = NULL;
+  FilterStream::close();
+}
+
+int JBIG2Stream::getChar() {
+  if (!decoded) {
+    decodeImage();
+  }
+  if (dataPtr && dataPtr < dataEnd) {
+    return (*dataPtr++ ^ 0xff) & 0xff;
+  }
+  return EOF;
+}
+
+int JBIG2Stream::lookChar() {
+  if (!decoded) {
+    decodeImage();
+  }
+  if (dataPtr && dataPtr < dataEnd) {
+    return (*dataPtr ^ 0xff) & 0xff;
+  }
+  return EOF;
+}
+
+int JBIG2Stream::getBlock(char *blk, int size) {
+  int n, i;
+
+  if (!decoded) {
+    decodeImage();
+  }
+  if (size <= 0) {
+    return 0;
+  }
+  if (dataEnd - dataPtr < size) {
+    n = (int)(dataEnd - dataPtr);
+  } else {
+    n = size;
+  }
+  for (i = 0; i < n; ++i) {
+    blk[i] = *dataPtr++ ^ 0xff;
+  }
+  return n;
+}
+
+GString *JBIG2Stream::getPSFilter(int psLevel, const char *indent,
+				  GBool okToReadStream) {
+  return NULL;
+}
+
+GBool JBIG2Stream::isBinary(GBool last) {
+  return str->isBinary(gTrue);
+}
+
+void JBIG2Stream::decodeImage() {
+  GList *t;
 
   // read the globals stream
   if (globalsStream.isStream()) {
@@ -1239,63 +1305,8 @@ void JBIG2Stream::reset() {
   } else {
     dataPtr = dataEnd = NULL;
   }
-}
 
-void JBIG2Stream::close() {
-  if (pageBitmap) {
-    delete pageBitmap;
-    pageBitmap = NULL;
-  }
-  if (segments) {
-    deleteGList(segments, JBIG2Segment);
-    segments = NULL;
-  }
-  if (globalSegments) {
-    deleteGList(globalSegments, JBIG2Segment);
-    globalSegments = NULL;
-  }
-  dataPtr = dataEnd = NULL;
-  FilterStream::close();
-}
-
-int JBIG2Stream::getChar() {
-  if (dataPtr && dataPtr < dataEnd) {
-    return (*dataPtr++ ^ 0xff) & 0xff;
-  }
-  return EOF;
-}
-
-int JBIG2Stream::lookChar() {
-  if (dataPtr && dataPtr < dataEnd) {
-    return (*dataPtr ^ 0xff) & 0xff;
-  }
-  return EOF;
-}
-
-int JBIG2Stream::getBlock(char *blk, int size) {
-  int n, i;
-
-  if (size <= 0) {
-    return 0;
-  }
-  if (dataEnd - dataPtr < size) {
-    n = (int)(dataEnd - dataPtr);
-  } else {
-    n = size;
-  }
-  for (i = 0; i < n; ++i) {
-    blk[i] = *dataPtr++ ^ 0xff;
-  }
-  return n;
-}
-
-GString *JBIG2Stream::getPSFilter(int psLevel, const char *indent,
-				  GBool okToReadStream) {
-  return NULL;
-}
-
-GBool JBIG2Stream::isBinary(GBool last) {
-  return str->isBinary(gTrue);
+  decoded = gTrue;
 }
 
 void JBIG2Stream::readSegments() {
@@ -1783,6 +1794,11 @@ GBool JBIG2Stream::readSymbolDictSeg(Guint segNum, Guint length,
 	    break;
 	  }
 	}
+	if (refAggNum <= 0 || refAggNum > 10000) {
+	  error(errSyntaxError, getPos(),
+		"Invalid refinement/aggregation instance count in JBIG2 symbol dictionary");
+	  goto syntaxError;
+	}
 #if 0 //~ This special case was added about a year before the final draft
       //~ of the JBIG2 spec was released.  I have encountered some old
       //~ JBIG2 images that predate it.
@@ -2042,7 +2058,14 @@ void JBIG2Stream::readTextRegionSeg(Guint segNum, GBool imm,
   for (i = 0; i < nRefSegs; ++i) {
     if ((seg = findSegment(refSegs[i]))) {
       if (seg->getType() == jbig2SegSymbolDict) {
-	numSyms += ((JBIG2SymbolDict *)seg)->getSize();
+	Guint segSize = ((JBIG2SymbolDict *)seg)->getSize();
+	if (segSize > INT_MAX || numSyms > INT_MAX - segSize) {
+	  error(errSyntaxError, getPos(),
+		"Too many symbols in JBIG2 text region");
+	  delete codeTables;
+	  return;
+	}
+	numSyms += segSize;
       } else if (seg->getType() == jbig2SegCodeTable) {
 	codeTables->append(seg);
       }
@@ -2418,6 +2441,18 @@ JBIG2Bitmap *JBIG2Stream::readTextRegion(GBool huff, GBool refine,
 	  refDX = ((rdw >= 0) ? rdw : rdw - 1) / 2 + rdx;
 	  refDY = ((rdh >= 0) ? rdh : rdh - 1) / 2 + rdy;
 
+	  if (rdw > INT_MAX - syms[symID]->getWidth() ||
+	      rdh > INT_MAX - syms[symID]->getHeight()) {
+	    error(errSyntaxError, getPos(),
+		  "Invalid refinement size in JBIG2 text region");
+	    continue;
+	  }
+	  // sanity check
+	  if (rdw > 1000 || rdh > 1000) {
+	    error(errSyntaxError, getPos(),
+		  "Invalid refinement size in JBIG2 text region");
+	    continue;
+	  }
 	  symbolBitmap =
 	    readGenericRefinementRegion(rdw + syms[symID]->getWidth(),
 					rdh + syms[symID]->getHeight(),
@@ -2505,7 +2540,8 @@ void JBIG2Stream::readPatternDictSeg(Guint segNum, Guint length) {
       !readULong(&grayMax)) {
     goto eofError;
   }
-  if (patternW == 0 || patternH == 0) {
+  if (patternW == 0 || patternH == 0 ||
+      grayMax > UINT_MAX / patternW - 1) {
     error(errSyntaxError, getPos(),
 	  "Bad size in JBIG2 pattern dictionary segment");
     return;
@@ -3926,12 +3962,19 @@ void JBIG2Stream::readPageInfoSeg(Guint length) {
       !readUByte(&flags) || !readUWord(&striping)) {
     goto eofError;
   }
-  if (pageW == 0 || pageH == 0 || pageW > INT_MAX / pageW) {
+  if (pageW == 0 || pageH == 0 ||
+      pageW > INT_MAX || pageH > INT_MAX ||
+      pageH > INT_MAX / pageW) {
     error(errSyntaxError, getPos(), "Bad page size in JBIG2 stream");
     return;
   }
   pageDefPixel = (flags >> 2) & 1;
   defCombOp = (flags >> 3) & 3;
+
+  // this will only happen if there are multiple page info segments
+  if (pageBitmap) {
+    delete pageBitmap;
+  }
 
   // allocate the page bitmap
   if (pageH == 0xffffffff) {

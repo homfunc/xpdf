@@ -11,10 +11,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma interface
-#endif
-
 #include "gtypes.h"
 #include "GfxState.h"
 #include "OutputDev.h"
@@ -103,10 +99,10 @@ public:
 				   double *matte, GBool interpolate);
 
   //----- transparency groups and soft masks
-  virtual void beginTransparencyGroup(GfxState *state, double *bbox,
-				      GfxColorSpace *blendingColorSpace,
-				      GBool isolated, GBool knockout,
-				      GBool forSoftMask);
+  virtual GBool beginTransparencyGroup(GfxState *state, double *bbox,
+				       GfxColorSpace *blendingColorSpace,
+				       GBool isolated, GBool knockout,
+				       GBool forSoftMask);
 
   //----- special access
 

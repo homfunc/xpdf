@@ -11,10 +11,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma interface
-#endif
-
 #include <stdio.h>
 #include "XRef.h"
 #include "Catalog.h"
@@ -23,6 +19,7 @@
 class GString;
 class BaseStream;
 class OutputDev;
+class Annots;
 class Links;
 class LinkAction;
 class LinkDest;
@@ -74,6 +71,9 @@ public:
   // Get catalog.
   Catalog *getCatalog() { return catalog; }
 
+  // Get annotations.
+  Annots *getAnnots() { return annots; }
+
   // Get base stream.
   BaseStream *getBaseStream() { return str; }
 
@@ -121,6 +121,7 @@ public:
 			GBool (*abortCheckCbk)(void *data) = NULL,
 			void *abortCheckCbkData = NULL);
 
+
   // Find a page, given its object ID.  Returns page number, or 0 if
   // not found.
   int findPage(int num, int gen) { return catalog->findPage(num, gen); }
@@ -162,6 +163,10 @@ public:
   GBool okToAddNotes(GBool ignoreOwnerPW = gFalse)
     { return xref->okToAddNotes(ignoreOwnerPW); }
 
+  // Is the PDF file damaged?  This checks to see if the xref table
+  // was constructed by the repair code.
+  GBool isDamaged() { return xref->isRepaired(); }
+
   // Is this document linearized?
   GBool isLinearized();
 
@@ -191,6 +196,9 @@ public:
 #endif
   char *getEmbeddedFileMem(int idx, int *size);
 
+  // Return true if the document uses JavaScript.
+  GBool usesJavaScript() { return catalog->usesJavaScript(); }
+
 
 private:
 
@@ -212,6 +220,7 @@ private:
   double pdfVersion;
   XRef *xref;
   Catalog *catalog;
+  Annots *annots;
 #ifndef DISABLE_OUTLINE
   Outline *outline;
 #endif

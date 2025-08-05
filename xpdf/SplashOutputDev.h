@@ -11,10 +11,6 @@
 
 #include <aconf.h>
 
-#ifdef USE_GCC_PRAGMAS
-#pragma interface
-#endif
-
 #include "gtypes.h"
 #include "SplashTypes.h"
 #include "config.h"
@@ -129,7 +125,15 @@ public:
   virtual void drawChar(GfxState *state, double x, double y,
 			double dx, double dy,
 			double originX, double originY,
-			CharCode code, int nBytes, Unicode *u, int uLen);
+			CharCode code, int nBytes, Unicode *u, int uLen,
+			GBool fill, GBool stroke, GBool makePath);
+  virtual void fillTextPath(GfxState *state);
+  virtual void strokeTextPath(GfxState *state);
+  virtual void clipToTextPath(GfxState *state);
+  virtual void clipToTextStrokePath(GfxState *state);
+  virtual void clearTextPath(GfxState *state);
+  virtual void addTextPathToSavedClipPath(GfxState *state);
+  virtual void clipToSavedClipPath(GfxState *state);
   virtual GBool beginType3Char(GfxState *state, double x, double y,
 			       double dx, double dy,
 			       CharCode code, Unicode *u, int uLen);
@@ -167,10 +171,10 @@ public:
 		       double llx, double lly, double urx, double ury);
 
   //----- transparency groups and soft masks
-  virtual void beginTransparencyGroup(GfxState *state, double *bbox,
-				      GfxColorSpace *blendingColorSpace,
-				      GBool isolated, GBool knockout,
-				      GBool forSoftMask);
+  virtual GBool beginTransparencyGroup(GfxState *state, double *bbox,
+				       GfxColorSpace *blendingColorSpace,
+				       GBool isolated, GBool knockout,
+				       GBool forSoftMask);
   virtual void endTransparencyGroup(GfxState *state);
   virtual void paintTransparencyGroup(GfxState *state, double *bbox);
   virtual void setSoftMask(GfxState *state, double *bbox, GBool alpha,
@@ -306,7 +310,8 @@ private:
 
   SplashFont *font;		// current font
   GBool needFontUpdate;		// set when the font needs to be updated
-  SplashPath *textClipPath;	// clipping path built with text object
+  SplashPath *savedTextPath;	// path built for text string
+  SplashPath *savedClipPath;	// clipping path built with text object
 
   SplashTransparencyGroup *	// transparency group stack
     transpGroupStack;
