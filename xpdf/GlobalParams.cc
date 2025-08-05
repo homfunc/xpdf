@@ -65,7 +65,7 @@
 #include "NameToUnicodeTable.h"
 #include "UnicodeMapTables.h"
 #include "UTF8.h"
-
+#include "UnicodeToUnicodeFontRules.h"
 //------------------------------------------------------------------------
 
 #define cidToUnicodeCacheSize     4
@@ -605,6 +605,14 @@ PopupMenuCmd::~PopupMenuCmd() {
 //------------------------------------------------------------------------
 
 GlobalParams::GlobalParams(const char *cfgFileName) {
+  init(cfgFileName, NULL);
+}
+
+GlobalParams::GlobalParams(const char *cfgFileName, const char *cfgExecutablePath) {
+  init(cfgFileName, cfgExecutablePath);
+}
+
+void GlobalParams::init(const char *cfgFileName, const char *cfgExecutablePath) {
   UnicodeMap *map;
   GString *fileName;
   FILE *f;
@@ -761,7 +769,7 @@ GlobalParams::GlobalParams(const char *cfgFileName) {
   launchCommand = NULL;
   movieCommand = NULL;
   defaultPrinter = NULL;
-  mapNumericCharNames = gTrue;
+  mapNumericCharNames = gFalse;
   mapUnknownCharNames = gFalse;
   mapExtTrueTypeFontsViaUnicode = gTrue;
   useTrueTypeUnicodeMapping = gFalse;
@@ -815,6 +823,10 @@ GlobalParams::GlobalParams(const char *cfgFileName) {
     if (!(f = fopen(fileName->getCString(), "r"))) {
       delete fileName;
     }
+  }
+  if (cfgExecutablePath && cfgExecutablePath[0]) {
+    executablePath = new GString(cfgExecutablePath);
+    executablePath->append('/');
   }
   if (!f) {
     fileName = appendToPath(getHomeDir(), xpdfUserConfigFile);
@@ -1434,7 +1446,13 @@ void GlobalParams::parseNameToUnicode(GList *tokens, GString *fileName,
     return;
   }
   name = (GString *)tokens->get(1);
-  if (!(f = openFile(name->getCString(), "r"))) {
+
+  GString *localName = name;
+  if (executablePath && name->getChar(0) != '/') {
+    localName = new GString(executablePath, name);
+  }
+
+  if (!(f = openFile(localName->getCString(), "r"))) {
     error(errConfig, -1, "Couldn't open 'nameToUnicode' file '{0:t}'", name);
     return;
   }
@@ -1469,7 +1487,13 @@ void GlobalParams::parseCIDToUnicode(GList *tokens, GString *fileName,
   if ((old = (GString *)cidToUnicodes->remove(collection))) {
     delete old;
   }
-  cidToUnicodes->add(collection->copy(), name->copy());
+
+  GString *localName = name;
+  if (executablePath && name->getChar(0) != '/') {
+    localName = new GString(executablePath, name);
+  }
+
+  cidToUnicodes->add(collection->copy(), localName->copy());
 }
 
 void GlobalParams::parseUnicodeToUnicode(GList *tokens, GString *fileName,
@@ -1487,7 +1511,13 @@ void GlobalParams::parseUnicodeToUnicode(GList *tokens, GString *fileName,
   if ((old = (GString *)unicodeToUnicodes->remove(font))) {
     delete old;
   }
-  unicodeToUnicodes->add(font->copy(), file->copy());
+
+  GString *localName = file;
+  if (executablePath && file->getChar(0) != '/') {
+    localName = new GString(executablePath, file);
+  }
+
+  unicodeToUnicodes->add(font->copy(), localName->copy());
 }
 
 void GlobalParams::parseUnicodeMap(GList *tokens, GString *fileName,
@@ -1504,7 +1534,13 @@ void GlobalParams::parseUnicodeMap(GList *tokens, GString *fileName,
   if ((old = (GString *)unicodeMaps->remove(encodingName))) {
     delete old;
   }
-  unicodeMaps->add(encodingName->copy(), name->copy());
+
+  GString *localName = name;
+  if (executablePath && name->getChar(0) != '/') {
+    localName = new GString(executablePath, name);
+  }
+
+  unicodeMaps->add(encodingName->copy(), localName->copy());
 }
 
 void GlobalParams::parseCMapDir(GList *tokens, GString *fileName, int line) {
@@ -1522,7 +1558,13 @@ void GlobalParams::parseCMapDir(GList *tokens, GString *fileName, int line) {
     list = new GList();
     cMapDirs->add(collection->copy(), list);
   }
-  list->append(dir->copy());
+
+  GString *localName = dir;
+  if (executablePath && dir->getChar(0) != '/') {
+    localName = new GString(executablePath, dir);
+  }
+
+  list->append(localName->copy());
 }
 
 void GlobalParams::parseToUnicodeDir(GList *tokens, GString *fileName,
@@ -1533,7 +1575,16 @@ void GlobalParams::parseToUnicodeDir(GList *tokens, GString *fileName,
 	  fileName, line);
     return;
   }
-  toUnicodeDirs->append(((GString *)tokens->get(1))->copy());
+
+  GString *name;
+  name = ((GString *)tokens->get(1))->copy();
+
+  GString *localName = name;
+  if (executablePath && name->getChar(0) != '/') {
+    localName = new GString(executablePath, name);
+  }
+
+  toUnicodeDirs->append(localName);
 }
 
 void GlobalParams::parseUnicodeRemapping(GList *tokens, GString *fileName,
@@ -1544,7 +1595,16 @@ void GlobalParams::parseUnicodeRemapping(GList *tokens, GString *fileName,
 	  fileName, line);
     return;
   }
-  unicodeRemapping->parseFile((GString *)tokens->get(1));
+
+  GString *name;
+  name = ((GString *)tokens->get(1))->copy();
+
+  GString *localName = name;
+  if (executablePath && name->getChar(0) != '/') {
+    localName = new GString(executablePath, name);
+  }
+
+  unicodeRemapping->parseFile(localName);
 }
 
 void GlobalParams::parseFontFile(GList *tokens, GString *fileName, int line) {
@@ -1553,8 +1613,16 @@ void GlobalParams::parseFontFile(GList *tokens, GString *fileName, int line) {
 	  fileName, line);
     return;
   }
-  fontFiles->add(((GString *)tokens->get(1))->copy(),
-		 ((GString *)tokens->get(2))->copy());
+
+  GString *name;
+  name = ((GString *)tokens->get(2))->copy();
+
+  GString *localName = name;
+  if (executablePath && name->getChar(0) != '/') {
+    localName = new GString(executablePath, name);
+  }
+
+  fontFiles->add(((GString *)tokens->get(1))->copy(), localName);
 }
 
 void GlobalParams::parseFontDir(GList *tokens, GString *fileName, int line) {
@@ -1573,8 +1641,16 @@ void GlobalParams::parseFontFileCC(GList *tokens, GString *fileName,
 	  fileName, line);
     return;
   }
-  ccFontFiles->add(((GString *)tokens->get(1))->copy(),
-		   ((GString *)tokens->get(2))->copy());
+
+  GString *name;
+  name = ((GString *)tokens->get(2))->copy();
+
+  GString *localName = name;
+  if (executablePath && name->getChar(0) != '/') {
+    localName = new GString(executablePath, name);
+  }
+
+  ccFontFiles->add(((GString *)tokens->get(1))->copy(), localName);
 }
 
 void GlobalParams::parsePSPaperSize(GList *tokens, GString *fileName,
@@ -3632,6 +3708,7 @@ CharCodeToUnicode *GlobalParams::getUnicodeToUnicode(GString *fontName) {
 
   lockGlobalParams;
   fileName = NULL;
+
   unicodeToUnicodes->startIter(&iter);
   while (unicodeToUnicodes->getNext(&iter, &fontPattern, (void **)&fileName)) {
     if (strstr(fontName->getCString(), fontPattern->getCString())) {
@@ -3649,6 +3726,21 @@ CharCodeToUnicode *GlobalParams::getUnicodeToUnicode(GString *fontName) {
   } else {
     ctu = NULL;
   }
+
+  for (FontRules fontrule : fontRules) {
+    GString * fontname  = new GString(fontrule.name);
+    if(strstr(fontName->getCString(), fontname->getCString())){
+      //memset(mapA + oldSize, 0, (size - oldSize) * sizeof(Unicode));
+      Unicode map[fontrule.maxCharCode + 1];
+      int n = (sizeof(advtt3f84ef53) / sizeof(UnicodeMapping));
+      for(int i = 0; i < n; i++){
+        map[fontrule.map[i].charcode]=fontrule.map[i].unicode;
+      }
+      ctu = CharCodeToUnicode::makeUnicodeToUnicode(fontName->copy(), map, fontrule.maxCharCode + 1);
+      unicodeToUnicodeCache->add(ctu);
+    }
+  }
+
   unlockGlobalParams;
   return ctu;
 }
@@ -4011,6 +4103,10 @@ void GlobalParams::setErrQuiet(GBool errQuietA) {
   lockGlobalParams;
   errQuiet = errQuietA;
   unlockGlobalParams;
+}
+
+void GlobalParams::setExecutablePath(GString *path) {
+  executablePath = path;
 }
 
 #ifdef _WIN32

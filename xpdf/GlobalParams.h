@@ -234,6 +234,7 @@ public:
   // Initialize the global parameters by attempting to read a config
   // file.
   GlobalParams(const char *cfgFileName);
+  GlobalParams(const char *cfgFileName, const char *cfgExecutablePath);
 
   ~GlobalParams();
 
@@ -362,6 +363,7 @@ public:
   UnicodeMap *getUnicodeMap(GString *encodingName);
   CMap *getCMap(GString *collection, GString *cMapName);
   UnicodeMap *getTextEncoding();
+  GString *getExecutablePath() { return executablePath; };
 
   //----- functions to set parameters
 
@@ -411,6 +413,7 @@ public:
   void setPrintCommands(GBool printCommandsA);
   void setPrintStatusInfo(GBool printStatusInfoA);
   void setErrQuiet(GBool errQuietA);
+  void setExecutablePath(GString *path);
 
 #ifdef _WIN32
   void setWin32ErrorInfo(const char *func, DWORD code);
@@ -420,7 +423,7 @@ public:
   static const char *defaultTextEncoding;
 
 private:
-
+  void init(const char *cfgFileName, const char *cfgExecutablePath);
   void setDataDirVar();
   void createDefaultKeyBindings();
   void initStateFilePaths();
@@ -627,6 +630,7 @@ private:
   CharCodeToUnicodeCache *unicodeToUnicodeCache;
   UnicodeMapCache *unicodeMapCache;
   CMapCache *cMapCache;
+  GString *executablePath;
 
 #if MULTITHREADED
   GMutex mutex;
